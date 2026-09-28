@@ -1,3 +1,5 @@
+import { Pointer } from "./pointer";
+import type { Control } from "./control";
 import type { Hand, Point } from "../gestures";
 /** Keep the casting hand stable when a second hand enters or leaves the frame. */
 export class CastingHand {
@@ -37,33 +39,36 @@ export class CastingHand {
   }
 }
 
-/** Smooth only presentation between detector samples; spell recognition uses raw input. */
+/** Presentation follows fresh samples, with bounded prediction between them. */
 export class CursorFollower {
-  private first: Point | null = null;
-  private second: Point | null = null;
+  private first: Pointer | null = null;
+  private second: Pointer | null = null;
   reset() {
     this.first = this.second = null;
   }
-  update(
-    input: import("./control").Control,
-    dt: number,
-  ): import("./control").Control {
+  sample(input: Control, timestamp: number) {
+    if (!input.valid) {
+      this.reset();
+      return;
+    }
+    this.first ??= new Pointer();
+    this.first.sample(input.position, timestamp);
+    if (input.secondPosition) {
+      this.second ??= new Pointer();
+      this.second.sample(input.secondPosition, timestamp);
+    } else this.second = null;
+  }
+  draw(input: Control, now: number): Control {
     if (!input.valid) {
       this.reset();
       return input;
     }
-    const alpha = 1 - Math.exp(-Math.max(0, dt) / 25);
-    const follow = (from: Point | null, to: Point): Point =>
-      from
-        ? {
-            x: from.x + (to.x - from.x) * alpha,
-            y: from.y + (to.y - from.y) * alpha,
-          }
-        : { ...to };
-    this.first = follow(this.first, input.position);
-    this.second = input.secondPosition
-      ? follow(this.second, input.secondPosition)
-      : null;
-    return { ...input, position: this.first, secondPosition: this.second };
+    return {
+      ...input,
+      position: this.first?.draw(now) ?? input.position,
+      secondPosition: input.secondPosition
+        ? (this.second?.draw(now) ?? input.secondPosition)
+        : null,
+    };
   }
 }

@@ -16,9 +16,16 @@ export type Detection = {
 export class HandDetector {
   private worker: Worker;
   private busy = false;
+  private timings: { at: number; age: number }[] = [];
+  stats: { hz: number; latency: number; at: number; delegate: string } | null =
+    null;
   private closed = false;
   private epoch = 0;
-  private lastSent = -Infinity;
+  private video: HTMLVideoElement | null = null;
+  private callback = 0;
+  private cameraFrame = -1;
+  private numHands = 2;
+  private usesVideoCallback = false;
   private lastVideo = -1;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private rejectLoad: ((error: Error) => void) | null = null;
@@ -65,6 +72,24 @@ export class HandDetector {
           this.rejectLoad = null;
           resolve();
         } else if (data.type === "result") {
+          const at = performance.now();
+          this.timings.push({ at, age: at - data.timestamp });
+          this.timings = this.timings
+            .filter((t) => at - t.at < 2000)
+            .slice(-90);
+          const span = at - this.timings[0].at;
+          this.stats = {
+            hz:
+              span > 0
+                ? Math.round(((this.timings.length - 1) * 1000) / span)
+                : 0,
+            latency: Math.round(
+              this.timings.reduce((sum, t) => sum + t.age, 0) /
+                this.timings.length,
+            ),
+            at,
+            delegate: data.delegate,
+          };
           clearTimeout(this.timer);
           this.busy = false;
           if (
@@ -72,6 +97,9 @@ export class HandDetector {
             performance.now() - data.timestamp < 500
           )
             this.onResult(data);
+          // A newer camera frame may have arrived while inference was running.
+          if (this.video)
+            this.submit(this.video, performance.now(), this.cameraFrame);
         }
       };
       this.worker.postMessage({
@@ -83,18 +111,37 @@ export class HandDetector {
       });
     });
   }
-  submit(video: HTMLVideoElement, now: number) {
+  start(video: HTMLVideoElement) {
+    this.video = video;
+    this.usesVideoCallback =
+      typeof video.requestVideoFrameCallback === "function";
+    const tick = (_now: number, metadata?: VideoFrameCallbackMetadata) => {
+      if (this.closed) return;
+      this.cameraFrame = metadata?.mediaTime ?? video.currentTime;
+      if (!document.hidden)
+        this.submit(video, performance.now(), this.cameraFrame);
+      this.callback = this.usesVideoCallback
+        ? video.requestVideoFrameCallback(tick)
+        : requestAnimationFrame(tick);
+    };
+    this.callback = this.usesVideoCallback
+      ? video.requestVideoFrameCallback(tick)
+      : requestAnimationFrame(tick);
+  }
+  setHands(count: 1 | 2) {
+    this.numHands = count;
+  }
+  submit(video: HTMLVideoElement, now: number, mediaTime = video.currentTime) {
     if (
       this.closed ||
       this.busy ||
       video.readyState < 2 ||
-      video.currentTime === this.lastVideo ||
-      now - this.lastSent < 33
+      document.hidden ||
+      mediaTime === this.lastVideo
     )
       return;
     this.busy = true;
-    this.lastSent = now;
-    this.lastVideo = video.currentTime;
+    this.lastVideo = mediaTime;
     const epoch = this.epoch;
     const width = video.videoWidth,
       height = video.videoHeight;
@@ -102,7 +149,12 @@ export class HandDetector {
       () => this.fail(new Error("Detector frame timed out")),
       15000,
     );
-    void createImageBitmap(video)
+    const scale = Math.min(1, (this.numHands === 1 ? 384 : 480) / width);
+    void createImageBitmap(video, {
+      resizeWidth: Math.round(width * scale),
+      resizeHeight: Math.round(height * scale),
+      resizeQuality: "low",
+    })
       .then((bitmap) => {
         if (this.closed || epoch !== this.epoch) {
           bitmap.close();
@@ -111,7 +163,15 @@ export class HandDetector {
           return;
         }
         this.worker.postMessage(
-          { type: "frame", bitmap, timestamp: now, epoch, width, height },
+          {
+            type: "frame",
+            bitmap,
+            timestamp: now,
+            epoch,
+            width,
+            height,
+            numHands: this.numHands,
+          },
           [bitmap],
         );
       })
@@ -131,6 +191,12 @@ export class HandDetector {
   close() {
     this.closed = true;
     clearTimeout(this.timer);
+    if (this.video) {
+      if (this.usesVideoCallback)
+        this.video.cancelVideoFrameCallback(this.callback);
+      else cancelAnimationFrame(this.callback);
+      this.video = null;
+    }
     this.worker.terminate();
   }
 }

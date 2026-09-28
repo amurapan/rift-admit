@@ -4,6 +4,7 @@ let files, options;
 let delegate = "GPU";
 let slowFrames = 0;
 let busy = false;
+let numHands = 2;
 self.onmessage = async ({ data }) => {
   if (data.type === "init") {
     try {
@@ -11,6 +12,16 @@ self.onmessage = async ({ data }) => {
       files = await Vision.FilesetResolver.forVisionTasks(
         `${data.assets}/wasm`,
       );
+      // Software WebGL can take seconds to compile its first inference. Prefer
+      // WASM immediately when the browser exposes a software renderer.
+      const probe = new OffscreenCanvas(1, 1).getContext("webgl2");
+      const debug = probe?.getExtension("WEBGL_debug_renderer_info");
+      const renderer = debug
+        ? probe.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+        : "";
+      if (!probe || /swiftshader|llvmpipe|lavapipe|software/i.test(renderer))
+        delegate = "CPU";
+      probe?.getExtension("WEBGL_lose_context")?.loseContext();
       options = {
         baseOptions: {
           modelAssetPath: `${data.assets}/hand_landmarker.task`,
@@ -53,6 +64,14 @@ self.onmessage = async ({ data }) => {
   }
   busy = true;
   try {
+    if (
+      data.numHands !== numHands &&
+      (data.numHands === 1 || data.numHands === 2)
+    ) {
+      numHands = data.numHands;
+      options.numHands = numHands;
+      await detector.setOptions({ numHands });
+    }
     const start = performance.now();
     const result = detector.detectForVideo(bitmap, timestamp);
     const inferenceMs = performance.now() - start;
@@ -75,6 +94,7 @@ self.onmessage = async ({ data }) => {
       height,
       inferenceMs,
       delegate,
+      numHands,
       landmarks: result.landmarks,
       sides: (result.handedness ?? []).map((categories) =>
         categories[0]?.score >= 0.7 ? categories[0].categoryName : null,

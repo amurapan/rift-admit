@@ -90,3 +90,34 @@ it("ignores old frames and shuts down on detector failure", async () => {
   expect(error).toHaveBeenCalledOnce();
   expect(worker.terminate).toHaveBeenCalledOnce();
 });
+
+it("starts the newest camera frame immediately after a result, without waiting for game rendering", async () => {
+  setup();
+  let frame: VideoFrameRequestCallback = () => {};
+  const camera = {
+    ...video,
+    requestVideoFrameCallback: vi.fn((callback) => {
+      frame = callback;
+      return 1;
+    }),
+    cancelVideoFrameCallback: vi.fn(),
+  } as unknown as HTMLVideoElement;
+  const detector = await HandDetector.create(vi.fn(), vi.fn());
+  detector.setHands(1);
+  detector.start(camera);
+  const now = performance.now();
+  frame(now, { mediaTime: 1 } as VideoFrameCallbackMetadata);
+  await Promise.resolve();
+  const worker = FakeWorker.latest;
+  expect(worker.messages[1].numHands).toBe(1);
+  frame(now + 30, { mediaTime: 2 } as VideoFrameCallbackMetadata);
+  frame(now + 60, { mediaTime: 3 } as VideoFrameCallbackMetadata);
+  expect(worker.messages.filter((m) => m.type === "frame")).toHaveLength(1);
+  detector.setHands(2);
+  worker.reply({ ...worker.messages[1], type: "result" });
+  await Promise.resolve();
+  expect(worker.messages.filter((m) => m.type === "frame")).toHaveLength(2);
+  expect(worker.messages[2].numHands).toBe(2);
+  detector.close();
+  expect(camera.cancelVideoFrameCallback).toHaveBeenCalledOnce();
+});

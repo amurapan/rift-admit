@@ -10,6 +10,7 @@ import {
   MotionControl,
   type Calibration,
 } from "./game/control";
+import { HandOverlay } from "./game/pointer";
 import { Scene } from "./game/scene";
 import { CastingHand, CursorFollower } from "./game/tracking";
 import { lessonArt } from "./game/lesson-art";
@@ -70,6 +71,7 @@ let control = emptyControl();
 let hand: Hand | null = null;
 const castingHand = new CastingHand();
 const cursors = new CursorFollower();
+const handOverlay = new HandOverlay();
 let calibrator = new Calibrator();
 let calibration: Calibration = { ...DEFAULT_CALIBRATION };
 let practiceList = [...lessons],
@@ -157,6 +159,7 @@ function spellbook(active = -1) {
 function clearMotion() {
   model?.invalidate();
   cursors.reset();
+  handOverlay.reset();
   motion.reset();
   control = emptyControl();
   castingHand.reset();
@@ -461,6 +464,7 @@ el("start").addEventListener("click", async () => {
       return;
     }
     model = loaded;
+    model.start(video);
     stream!.getVideoTracks()[0].onended = () =>
       shutdown("Камера отключилась. Подключи её и начни снова.");
     lastInference = 0;
@@ -582,37 +586,20 @@ function acceptDetection(detected: Detection) {
   const index = castingHand.choose(hands, sides);
   hand = index < 0 ? null : (hands[index] ?? null);
   control = motion.update(hand, hands[1 - index] ?? null, now, calibration);
+  cursors.sample(control, now);
+  handOverlay.sample(
+    index < 0
+      ? []
+      : [
+          landmarks[index],
+          ...(landmarks[1 - index] ? [landmarks[1 - index]] : []),
+        ],
+    now,
+  );
   text(
     "tracking-status",
     hand ? (hand.quality ?? "✧ РУКА РАСПОЗНАНА") : "✧ ПОКАЖИ РУКУ В КАДРЕ",
   );
-  if (
-    skeleton.width !== video.videoWidth ||
-    skeleton.height !== video.videoHeight
-  ) {
-    skeleton.width = video.videoWidth;
-    skeleton.height = video.videoHeight;
-  }
-  sk.clearRect(0, 0, skeleton.width, skeleton.height);
-  landmarks.forEach((points, i) => {
-    sk.strokeStyle = i === index ? "#b4efd9" : "#e1c1ff";
-    sk.fillStyle = sk.strokeStyle;
-    sk.lineWidth = 2;
-    connections.forEach((chain) => {
-      sk.beginPath();
-      chain.forEach((n, j) => {
-        const p = points[n];
-        if (j) sk.lineTo(p.x * skeleton.width, p.y * skeleton.height);
-        else sk.moveTo(p.x * skeleton.width, p.y * skeleton.height);
-      });
-      sk.stroke();
-    });
-    points.forEach((p) => {
-      sk.beginPath();
-      sk.arc(p.x * skeleton.width, p.y * skeleton.height, 2.5, 0, Math.PI * 2);
-      sk.fill();
-    });
-  });
   if (document.body.classList.contains("help-open")) return true;
   if (mode === "awakening") {
     awakening.update(control, dt);
@@ -701,6 +688,35 @@ function acceptDetection(detected: Detection) {
     }
   }
   return true;
+}
+function drawHandOverlay(now: number) {
+  if (
+    skeleton.width !== video.videoWidth ||
+    skeleton.height !== video.videoHeight
+  ) {
+    skeleton.width = video.videoWidth;
+    skeleton.height = video.videoHeight;
+  }
+  sk.clearRect(0, 0, skeleton.width, skeleton.height);
+  handOverlay.draw(now).forEach((points, i) => {
+    sk.strokeStyle = i === 0 ? "#b4efd9" : "#e1c1ff";
+    sk.fillStyle = sk.strokeStyle;
+    sk.lineWidth = 2;
+    connections.forEach((chain) => {
+      sk.beginPath();
+      chain.forEach((n, j) => {
+        const p = points[n];
+        if (j) sk.lineTo(p.x * skeleton.width, p.y * skeleton.height);
+        else sk.moveTo(p.x * skeleton.width, p.y * skeleton.height);
+      });
+      sk.stroke();
+    });
+    points.forEach((p) => {
+      sk.beginPath();
+      sk.arc(p.x * skeleton.width, p.y * skeleton.height, 2.5, 0, Math.PI * 2);
+      sk.fill();
+    });
+  });
 }
 function updateHud(now: number) {
   if (!world) return;
@@ -870,7 +886,16 @@ function frame(now: number) {
         clearMotion();
         hand = null;
       }
-      model.submit(video, now);
+      model.setHands(
+        mode === "awakening" ||
+          ((mode === "practice" || mode === "demo") &&
+            world?.practice === "domain") ||
+          (mode === "battle" &&
+            !!world &&
+            (world.energy >= 100 || world.magic.stage !== "idle"))
+          ? 2
+          : 1,
+      );
       if ((mode === "battle" || mode === "practice") && world) {
         world.tick(
           Math.min(dt, 100),
@@ -930,8 +955,20 @@ function frame(now: number) {
             : 1,
       tear: awakening.complete ? 1 : awakening.spread,
     };
-    if (updateUi) updateInputGuide();
-    scene.draw(world, cursors.update(control, dt), now);
+    if (updateUi) {
+      updateInputGuide();
+      const stats = model?.stats;
+      text(
+        "detector-stats",
+        stats && now - stats.at < 2000
+          ? `Отклик рук: ${stats.hz} обновл./с · ${stats.latency} мс · ${stats.delegate}`
+          : model
+            ? "Отклик рук: ждём кадр камеры…"
+            : "Отклик рук: камера выключена",
+      );
+    }
+    drawHandOverlay(now);
+    scene.draw(world, cursors.draw(control, now), now);
   }
   requestAnimationFrame(frame);
 }

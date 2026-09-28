@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 const fakeModel = `
 self.addEventListener('message',({data})=>{if(data.type==='test-hand')self.__testHand={...data.hand,since:performance.now()};});
 var Vision={FilesetResolver:{forVisionTasks:async()=>({})},
-HandLandmarker:{createFromOptions:async()=>({close(){},detectForVideo(_v,now){
+HandLandmarker:{createFromOptions:async()=>({close(){},async setOptions(){},detectForVideo(_v,now){
  now=performance.now();
  const s=self.__testHand??{gesture:'none',point:{x:.5,y:.5},since:0};
  function hand(pose,point){
