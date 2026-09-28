@@ -149,12 +149,7 @@ export class HandDetector {
       () => this.fail(new Error("Detector frame timed out")),
       15000,
     );
-    const scale = Math.min(1, (this.numHands === 1 ? 384 : 480) / width);
-    void createImageBitmap(video, {
-      resizeWidth: Math.round(width * scale),
-      resizeHeight: Math.round(height * scale),
-      resizeQuality: "low",
-    })
+    void createImageBitmap(video)
       .then((bitmap) => {
         if (this.closed || epoch !== this.epoch) {
           bitmap.close();

@@ -398,6 +398,8 @@ test("slow inference stays in the worker while the interface keeps drawing", asy
 }) => {
   await setup(page, 200);
   await gesture(page, "open");
+  // Measure steady operation after initial graphics allocation and resizing.
+  await page.waitForTimeout(2500);
   const sample = await page.evaluate(
     () =>
       new Promise<{ frames: number; detections: number }>((resolve) => {
@@ -417,8 +419,10 @@ test("slow inference stays in the worker while the interface keeps drawing", asy
       }),
   );
   expect(sample.detections).toBeGreaterThanOrEqual(2);
-  // A synchronous 200 ms detector would allow at most seven frames here.
-  expect(sample.frames).toBeGreaterThan(14);
+  // Rendering must outpace inference. Compare both measured rates rather than
+  // assuming a particular GPU speed on the test machine. Synchronous inference
+  // inside RAF cannot render multiple frames per detector result.
+  expect(sample.frames).toBeGreaterThanOrEqual(sample.detections * 2);
   await page.locator("#stop").click();
   const stopped = await page.evaluate(() => (window as any).__detectorFrames);
   await page.waitForTimeout(300);

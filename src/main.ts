@@ -690,18 +690,20 @@ function acceptDetection(detected: Detection) {
   return true;
 }
 function drawHandOverlay(now: number) {
-  if (
-    skeleton.width !== video.videoWidth ||
-    skeleton.height !== video.videoHeight
-  ) {
-    skeleton.width = video.videoWidth;
-    skeleton.height = video.videoHeight;
+  if (!video.videoWidth || !video.videoHeight) return;
+  // The camera preview is only ~126px wide. Do not repaint a full VGA overlay
+  // at display refresh rate just to downscale it again during compositing.
+  const width = Math.min(256, video.videoWidth);
+  const height = Math.round((width * video.videoHeight) / video.videoWidth);
+  if (skeleton.width !== width || skeleton.height !== height) {
+    skeleton.width = width;
+    skeleton.height = height;
   }
   sk.clearRect(0, 0, skeleton.width, skeleton.height);
   handOverlay.draw(now).forEach((points, i) => {
     sk.strokeStyle = i === 0 ? "#b4efd9" : "#e1c1ff";
     sk.fillStyle = sk.strokeStyle;
-    sk.lineWidth = 2;
+    sk.lineWidth = 1;
     connections.forEach((chain) => {
       sk.beginPath();
       chain.forEach((n, j) => {
@@ -713,7 +715,7 @@ function drawHandOverlay(now: number) {
     });
     points.forEach((p) => {
       sk.beginPath();
-      sk.arc(p.x * skeleton.width, p.y * skeleton.height, 2.5, 0, Math.PI * 2);
+      sk.arc(p.x * skeleton.width, p.y * skeleton.height, 1, 0, Math.PI * 2);
       sk.fill();
     });
   });
