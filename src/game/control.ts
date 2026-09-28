@@ -13,6 +13,9 @@ export const DEFAULT_CALIBRATION: Calibration = {
   maxY: 0.77,
 };
 export type Slash = { from: Point; to: Point; id?: number };
+// Arena-space distance, matching the displayed cursors after calibration.
+// Palms should remain separated so the camera can keep tracking both hands.
+export const DOMAIN_NEAR_DISTANCE = 0.52;
 export type Control = {
   valid: boolean;
   open: boolean;
@@ -149,12 +152,15 @@ export class MotionControl {
         this.samples = [{ point, time: now }];
       }
     }
-    const domainPose =
-      !!second?.open &&
-      !second.quality &&
-      hand.open &&
-      distance(hand.palm ?? hand.cursor, second.palm ?? second.cursor) < 0.19;
     const twoHands = !!second && !second.quality;
+    const secondPosition = twoHands
+      ? mapped(second!.palm ?? second!.cursor, calibration)
+      : null;
+    const domainPose =
+      !!secondPosition &&
+      !!second?.open &&
+      hand.open &&
+      distance(point, secondPosition) <= DOMAIN_NEAR_DISTANCE;
     const handGap = twoHands
       ? distance(hand.palm ?? hand.cursor, second!.palm ?? second!.cursor)
       : 0;
@@ -174,9 +180,7 @@ export class MotionControl {
         handGap > 0.08 &&
         handGap < 0.28,
       handGap,
-      secondPosition: twoHands
-        ? mapped(second!.palm ?? second!.cursor, calibration)
-        : null,
+      secondPosition,
       position: point,
       velocity,
       pinching: this.pinched,

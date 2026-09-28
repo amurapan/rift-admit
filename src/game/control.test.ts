@@ -89,6 +89,20 @@ it("only nearby open palms form the secret pose", () => {
       .domainPose,
   ).toBe(false);
 });
+it("accepts comfortably separated palms using the calibrated cursor distance", () => {
+  const motion = new MotionControl();
+  for (const calibration of [
+    DEFAULT_CALIBRATION,
+    { minX: 0.1, maxX: 0.9, minY: 0.1, maxY: 0.9 },
+  ]) {
+    const rawX = (x: number) => calibration.minX + x * (calibration.maxX - calibration.minX);
+    expect(motion.update(hand(rawX(0.27)), hand(rawX(0.73)), 100, calibration).domainPose).toBe(true);
+    expect(motion.update(hand(rawX(0.15)), hand(rawX(0.85)), 200, calibration).domainPose).toBe(false);
+    expect(motion.update(hand(rawX(0.27)), hand(rawX(0.73), 0.5, { open: false }), 300, calibration).domainPose).toBe(false);
+    expect(motion.update(hand(rawX(0.27)), hand(rawX(0.73), 0.5, { quality: "clipped" }), 400, calibration).domainPose).toBe(false);
+    expect(motion.update(hand(rawX(0.27)), null, 500, calibration).domainPose).toBe(false);
+  }
+});
 it("calibrates to comfortable motion and requires both horizontal and vertical coverage", () => {
   const calibration = new Calibrator();
   for (let i = 0; i < 40; i++)

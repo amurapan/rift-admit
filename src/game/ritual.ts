@@ -135,6 +135,7 @@ export class Ritual {
   private lastPinch = false;
   private strokeId: number | undefined;
   private errorMs = 0;
+  private domainMissMs = 0;
   reset() {
     this.chargeMs = 0;
     this.charge = 0;
@@ -145,6 +146,7 @@ export class Ritual {
     this.bladeMs = 0;
     this.stage = "idle";
     this.domainHold = 0;
+    this.domainMissMs = 0;
     this.releaseHold = 0;
     this.path = [];
     this.drawing = false;
@@ -154,14 +156,22 @@ export class Ritual {
     this.progress = 0;
     this.label = "";
   }
-  pause() {
+  pause(trackingLossMs?: number) {
     const stage = this.stage,
       circle = this.circle,
       path = this.path,
-      elapsed = this.ritualMs;
+      elapsed = this.ritualMs,
+      hold = this.domainHold,
+      missed = this.domainMissMs + (trackingLossMs ?? 0);
     this.reset();
     this.stage = stage;
     this.ritualMs = elapsed;
+    // A few missed camera frames must not erase a nearly completed seal.
+    // Explicit pauses still reset it; missing input never advances the hold.
+    if (trackingLossMs !== undefined && stage === "idle" && missed <= 180) {
+      this.domainHold = hold;
+      this.domainMissMs = missed;
+    }
     if (stage === "release") {
       this.circle = circle;
       this.path = path;
@@ -180,7 +190,7 @@ export class Ritual {
   ): MagicAction {
     const action: MagicAction = {};
     if (!input.valid) {
-      this.pause();
+      this.pause(dt);
       return action;
     }
     this.cooldown = Math.max(0, this.cooldown - dt);
@@ -202,15 +212,21 @@ export class Ritual {
           ? "Покажи ОБЕ руки: на экране должны быть курсоры ① и ②."
           : !input.open || !input.secondOpen
             ? "Раскрой все пальцы на ОБЕИХ руках. Здесь нужны ладони, а не знак ✌."
-            : input.handGap >= 0.19
-              ? "Сблизь курсоры ① и ②. Держи ладони рядом, не накладывая их друг на друга."
-              : "Верно — удержи обе ладони рядом до заполнения полоски.";
-      this.domainHold = input.domainPose ? this.domainHold + dt : 0;
+            : !input.domainPose
+              ? "Подвинь обе ладони к центру до зелёной связи между курсорами. Совмещать руки не нужно."
+              : "Достаточно близко! Остановись и удержи раскрытые ладони до заполнения полоски.";
+      if (input.domainPose) {
+        this.domainHold += dt;
+        this.domainMissMs = 0;
+      } else {
+        this.domainMissMs += dt;
+        if (this.domainMissMs > 180) this.domainHold = 0;
+      }
       if (this.domainHold > 0) {
         this.label = "ТЕРРИТОРИЯ · ПЕРВАЯ ПЕЧАТЬ";
         this.progress = this.domainHold / 700;
       }
-      if (this.domainHold >= 700) {
+      if (input.domainPose && this.domainHold >= 700) {
         this.stage = "draw";
         this.ritualMs = 0;
         this.path = [];
@@ -218,7 +234,10 @@ export class Ritual {
         this.bladeMs = 0;
         action.cue = "seal";
       }
-    } else if (this.stage === "idle") this.domainHold = 0;
+    } else if (this.stage === "idle") {
+      this.domainHold = 0;
+      this.domainMissMs = 0;
+    }
     if (this.stage !== "idle") {
       this.ritualMs += dt;
       if (allowed !== "domain" && this.ritualMs > 18000) {

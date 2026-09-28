@@ -1,5 +1,5 @@
 import { Arena, BOSS, CORE, type FX } from "./arena";
-import { clamp, type Control } from "./control";
+import { clamp, distance, DOMAIN_NEAR_DISTANCE, type Control } from "./control";
 import type { Point } from "../gestures";
 type Particle = Point & {
   vx: number;
@@ -789,6 +789,50 @@ export class Scene {
       (!intro || this.presentation.reveal >= 1) &&
       !world?.ended
     ) {
+      if (
+        world &&
+        !world.practiceDone &&
+        (world.practice === "domain" || (!world.practice && world.energy >= 100)) &&
+        !world.domainMs &&
+        world.magic.stage === "idle" &&
+        input.secondPosition
+      ) {
+        const a = to(input.position), b = to(input.secondPosition);
+        const gap = distance(input.position, input.secondPosition);
+        const near = gap <= DOMAIN_NEAR_DISTANCE;
+        const bothOpen = input.open && input.secondOpen;
+        const color = input.domainPose ? "#95f4dd" : "#f4ce92";
+        const x = clamp((a.x + b.x) / 2, 115, w - 115);
+        const y = Math.max(100, Math.min(a.y, b.y) - 52);
+        c.save();
+        c.strokeStyle = color;
+        c.lineWidth = input.domainPose ? 3 : 2;
+        c.setLineDash(input.domainPose ? [] : [5, 7]);
+        c.beginPath();
+        c.moveTo(a.x, a.y);
+        c.lineTo(b.x, b.y);
+        c.stroke();
+        c.setLineDash([]);
+        c.fillStyle = "#100b1de6";
+        c.fillRect(x - 110, y - 15, 220, 40);
+        c.fillStyle = color;
+        c.font = "bold 11px Manrope,sans-serif";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.fillText(
+          !bothOpen ? "РАСКРОЙ ОБЕ ЛАДОНИ"
+            : near ? "ВЕРНО · УДЕРЖИ ЛАДОНИ"
+              : `СБЛИЗЬ · ЕЩЁ ${Math.ceil((1 - DOMAIN_NEAR_DISTANCE / gap) * 100)}%`,
+          x, y,
+        );
+        c.fillStyle = "#ffffff22";
+        c.fillRect(x - 92, y + 13, 184, 3);
+        c.fillStyle = color;
+        c.fillRect(x - 92, y + 13, 184 * (near
+          ? clamp(world.magic.domainHold / 700)
+          : clamp(DOMAIN_NEAR_DISTANCE / gap)), 3);
+        c.restore();
+      }
       const cursor = (
         point: Point,
         number: number,

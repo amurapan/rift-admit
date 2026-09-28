@@ -30,6 +30,31 @@ function draw(r: Ritual, path = circle(), allowed: string | null = null) {
   r.update(open, 40, 100, allowed);
 }
 describe("spell rituals", () => {
+  it("tolerates brief recognition flicker without counting missing or incorrect poses as hold time", () => {
+    const pose = input({ twoHands: true, open: true, secondOpen: true, domainPose: true });
+    for (const missing of [emptyControl(), input({ twoHands: true, open: true, secondOpen: false })]) {
+      const r = new Ritual();
+      hold(r, pose, 600);
+      hold(r, missing, 150);
+      expect(r.domainHold).toBe(600);
+      expect(r.stage).toBe("idle");
+      r.update(pose, 50, 100);
+      expect(r.stage).toBe("idle");
+      r.update(pose, 50, 100);
+      expect(r.stage).toBe("draw");
+    }
+  });
+  it("resets the initial hold after sustained tracking loss or an explicit pause", () => {
+    const pose = input({ domainPose: true });
+    const r = new Ritual();
+    hold(r, pose, 600);
+    for (let i = 0; i < 5; i++) r.pause(50);
+    expect(r.domainHold).toBe(0);
+    r.update(pose, 100, 100);
+    expect(r.stage).toBe("idle");
+    r.pause();
+    expect(r.domainHold).toBe(0);
+  });
   it("requires a neutral open palm before compression, so the tutorial fist cannot cast", () => {
     const r = new Ritual();
     hold(r, input({ fist: true }), 1200);

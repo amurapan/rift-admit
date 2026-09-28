@@ -236,7 +236,7 @@ export class Arena {
     if (!input.valid) {
       this.shieldActive = false;
       this.shieldAge = 0;
-      this.magic.pause();
+      this.magic.pause(deltaMs);
       return;
     }
     let dt = deltaMs;

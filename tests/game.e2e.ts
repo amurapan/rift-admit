@@ -308,7 +308,17 @@ test("territory guide shows both hands, survives tracking loss and teaches the c
   await gesture(page, "open");
   await expect(page.locator("#hint")).toContainText("ОБЕ руки");
   await expect(page.locator("#second-hand-state")).toContainText("не видна");
-  await palms(page);
+  await palms(page, true);
+  await expect(page.locator("#hint")).toContainText("до зелёной связи");
+  await page.waitForTimeout(800);
+  expect(await page.evaluate(() => (window as any).__snapshot.stage)).toBe("idle");
+  await page.screenshot({ path: "test-results/palms-distance-guide.png" });
+  // A comfortable visible gap used to fail the raw-camera distance threshold.
+  await gesture(page, "open", { x: 0.27, y: 0.5 }, {
+    second: { gesture: "open", point: { x: 0.73, y: 0.5 } },
+  });
+  await expect(page.locator("#hint")).toContainText("Достаточно близко");
+  await page.screenshot({ path: "test-results/palms-accepted.png" });
   await expect(page.locator("#second-hand-state")).toContainText(
     "ладонь раскрыта",
   );
