@@ -15,6 +15,14 @@ export const DEFAULT_CALIBRATION: Calibration = {
 export type Slash = { from: Point; to: Point; id?: number };
 export type Control = {
   valid: boolean;
+  open: boolean;
+  fist: boolean;
+  bladeSign: boolean;
+  twoHands: boolean;
+  secondOpen: boolean;
+  dualSign: boolean;
+  handGap: number;
+  secondPosition: Point | null;
   position: Point;
   velocity: Point;
   pinching: boolean;
@@ -27,6 +35,14 @@ export type Control = {
 };
 export const emptyControl = (): Control => ({
   valid: false,
+  open: false,
+  fist: false,
+  bladeSign: false,
+  twoHands: false,
+  secondOpen: false,
+  dualSign: false,
+  handGap: 0,
+  secondPosition: null,
   position: { x: 0.5, y: 0.6 },
   velocity: { x: 0, y: 0 },
   pinching: false,
@@ -92,7 +108,8 @@ export class MotionControl {
     // create false throw velocities and cuts during a gesture change.
     const point = mapped(hand.palm ?? hand.cursor, calibration);
     const previous = this.pinched;
-    this.pinched = hand.pinchRatio < (previous ? 0.44 : 0.29);
+    this.pinched =
+      hand.extended > 0 && hand.pinchRatio < (previous ? 0.44 : 0.29);
     const released = previous && !this.pinched;
     this.samples.push({ point, time: now });
     this.samples = this.samples.filter((sample) => now - sample.time <= 220);
@@ -104,13 +121,14 @@ export class MotionControl {
       x: clamp((point.x - reference.point.x) / seconds, -4, 4),
       y: clamp((point.y - reference.point.y) / seconds, -4, 4),
     };
-    if (hand.open) this.openSince ||= now;
+    const cutting = hand.open || !!hand.bladeSign;
+    if (cutting) this.openSince ||= now;
     else this.openSince = 0;
     let slash: Slash | null =
-      this.stroke && now < this.stroke.until && hand.open && !released
+      this.stroke && now < this.stroke.until && cutting && !released
         ? { from: this.stroke.from, to: point, id: this.stroke.id }
         : null;
-    if (hand.open && !released && now - this.lastSlash > 340) {
+    if (cutting && !released && now - this.lastSlash > 340) {
       const start = this.samples.find((sample) => {
         const elapsed = (now - sample.time) / 1000;
         return (
@@ -132,8 +150,27 @@ export class MotionControl {
       !second.quality &&
       hand.open &&
       distance(hand.palm ?? hand.cursor, second.palm ?? second.cursor) < 0.19;
+    const twoHands = !!second && !second.quality;
+    const handGap = twoHands
+      ? distance(hand.palm ?? hand.cursor, second!.palm ?? second!.cursor)
+      : 0;
     return {
       valid: true,
+      open: hand.open,
+      fist: hand.extended === 0 && !this.pinched,
+      bladeSign: !!hand.bladeSign,
+      twoHands,
+      secondOpen: twoHands && !!second?.open,
+      dualSign:
+        twoHands &&
+        !!hand.bladeSign &&
+        !!second?.bladeSign &&
+        handGap > 0.08 &&
+        handGap < 0.28,
+      handGap,
+      secondPosition: twoHands
+        ? mapped(second!.palm ?? second!.cursor, calibration)
+        : null,
       position: point,
       velocity,
       pinching: this.pinched,

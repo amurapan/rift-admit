@@ -6,6 +6,7 @@ export class Sound {
   private master: GainNode | null = null;
   private nextBeat = 0;
   private beat = 0;
+  private nextCharge = 0;
   private voices = 0;
   enabled = true;
   async unlock() {
@@ -72,11 +73,21 @@ export class Sound {
   effect(event: FX) {
     if (event.continuation) return;
     switch (event.type) {
-      case "catch":
+      case "charge":
         this.tone(330, 0.22, "sine", 0.5, 880);
         break;
-      case "throw":
-        this.tone(680, 0.23, "triangle", 0.35, 190);
+      case "burst":
+        this.tone(65, 1.1, "sine", 0.7, 28);
+        this.tone(440, 0.6, "sawtooth", 0.13, 45);
+        break;
+      case "armed":
+        this.tone(660, 0.5, "sine", 0.3, 990);
+        break;
+      case "seal":
+        [220, 330, 440].forEach((f) => this.tone(f, 1, "sine", 0.2));
+        break;
+      case "fail":
+        this.tone(180, 0.25, "triangle", 0.2, 90);
         break;
       case "slash":
         this.tone(1100, 0.13, "sawtooth", 0.13, 100);
@@ -127,6 +138,17 @@ export class Sound {
     if (this.beat % 4 === 0) this.tone(65.4, 0.8, "triangle", 0.15, 55);
     if (phase > 0 && this.beat % 2 === 0) this.tone(130, 0.12, "sine", 0.2, 40);
     this.beat++;
+  }
+  charge(power: number) {
+    if (!this.context || power <= 0) {
+      this.nextCharge = 0;
+      return;
+    }
+    const now = this.context.currentTime;
+    if (now < this.nextCharge) return;
+    this.nextCharge = now + 0.14;
+    this.tone(70 + power * 130, 0.3, "sine", 0.12, 100 + power * 180);
+    this.tone(220 + power * 400, 0.22, "triangle", 0.04);
   }
   suspend() {
     void this.context?.suspend();

@@ -1,6 +1,6 @@
 // Versioned separately from the earlier scripted prototype: these scores have
 // different rules and should not be compared with the nine-gesture exercise.
-const KEY = "rift.arena.best.v2";
+const KEY = "rift.arena.best.v3";
 export function readBest(storage: Pick<Storage, "getItem">): number {
   try {
     const score = Number(storage.getItem(KEY));

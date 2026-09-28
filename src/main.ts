@@ -11,12 +11,16 @@ import {
   type Calibration,
 } from "./game/control";
 import { Scene } from "./game/scene";
+import { CastingHand } from "./game/tracking";
+import { lessonArt } from "./game/lesson-art";
+import { Awakening } from "./game/ritual";
 import { Sound } from "./game/audio";
 import { markup } from "./ui";
 import "./style.css";
 import "./battle.css";
 import "./tutorial.css";
 import "./arena.css";
+import "./immersion.css";
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = markup;
 const el = <T extends HTMLElement = HTMLElement>(id: string) =>
@@ -31,17 +35,29 @@ const scene = new Scene(el<HTMLCanvasElement>("scene"));
 const sound = new Sound();
 const motion = new MotionControl();
 const tutorial = new TutorialGate();
-const lessons: Lesson[] = ["pinch", "shield", "swipe"];
-const names = ["ТЕЛЕКИНЕЗ", "ОТРАЖЕНИЕ", "РАЗРЕЗ"];
+const lessons: Lesson[] = ["vortex", "shield", "swipe", "domain"];
+const names = [
+  "СЖАТИЕ ПРОСТРАНСТВА",
+  "ОТРАЖЕНИЕ",
+  "РАЗРЕЗ РЕАЛЬНОСТИ",
+  "ТЕРРИТОРИЯ",
+];
 let mode:
   | "idle"
   | "loading"
+  | "awakening"
   | "calibration"
   | "demo"
   | "practice"
   | "ready"
   | "battle"
   | "result" = "idle";
+let awakening = new Awakening();
+let awakeningDoneAt = 0;
+let trained = false;
+try {
+  trained = localStorage.getItem("rift.ritual.trained") === "yes";
+} catch {}
 let model: HandLandmarker | null = null;
 let stream: MediaStream | null = null;
 let generation = 0;
@@ -51,7 +67,7 @@ let lastVideo = -1,
 let world: Arena | null = null;
 let control = emptyControl();
 let hand: Hand | null = null;
-let previousPalm: Point | null = null;
+const castingHand = new CastingHand();
 let calibrator = new Calibrator();
 let calibration: Calibration = { ...DEFAULT_CALIBRATION };
 let practiceList = [...lessons],
@@ -68,7 +84,7 @@ let pendingHint = "",
   hintAt = 0;
 try {
   bestScore = readBest(localStorage);
-  const saved = JSON.parse(localStorage.getItem("rift.runs.v2") ?? "[]");
+  const saved = JSON.parse(localStorage.getItem("rift.runs.v3") ?? "[]");
   if (Array.isArray(saved))
     runs = saved
       .filter(
@@ -94,7 +110,10 @@ function history() {
 history();
 
 function hidePanels() {
+  document.body.classList.remove("help-open");
+  el("help").setAttribute("aria-expanded", "false");
   for (const id of [
+    "awakening",
     "start-panel",
     "calibration",
     "lesson-demo",
@@ -123,7 +142,7 @@ function spellbook(active = -1) {
       mode === "ready" ||
         mode === "result" ||
         ((mode === "demo" || mode === "practice") &&
-          practiceList.length === 3 &&
+          practiceList.length === 4 &&
           i < lessonIndex),
     );
     spell.querySelector(".spell-check")!.textContent = spell.classList.contains(
@@ -136,7 +155,7 @@ function spellbook(active = -1) {
 function clearMotion() {
   motion.reset();
   control = emptyControl();
-  previousPalm = null;
+  castingHand.reset();
   resultHold = 0;
 }
 function beginCalibration() {
@@ -165,8 +184,6 @@ function beginTraining(single?: Lesson) {
   lessonIndex = 0;
   introduceLesson();
 }
-const palmDrawing =
-  '<path fill="#352441" stroke="#d9bcf7" stroke-width="2" d="M100 137 C86 129 79 115 71 104 L51 83 C46 76 54 69 61 74 L78 88 V41 C78 30 91 30 91 41 V75 V27 C91 16 105 16 105 27 V73 V20 C105 9 119 9 119 20 V73 V34 C119 23 133 23 133 34 V89 L139 84 C147 79 153 88 149 98 L140 122 C137 132 129 140 121 140 Z"/>';
 function introduceLesson() {
   const lesson = practiceList[lessonIndex],
     index = lessons.indexOf(lesson);
@@ -176,37 +193,41 @@ function introduceLesson() {
   tutorial.reset();
   clearMotion();
   hidePanels();
+  world.tick(1, { ...emptyControl(), valid: true });
   el("lesson-demo").hidden = false;
   text(
     "arena-status",
-    practiceList.length === 1 ? "ЛИЧНАЯ ТРЕНИРОВКА" : "ОСВОЕНИЕ МАГИИ",
+    practiceList.length === 1 ? "ЛИЧНАЯ ТРЕНИРОВКА" : "ПРОБУЖДЕНИЕ СИЛЫ",
   );
   text("counter", `${lessonIndex + 1} / ${practiceList.length}`);
-  text("lesson-number", `СПОСОБНОСТЬ ${index + 1} · СНАЧАЛА ПОСМОТРИ`);
+  text(
+    "lesson-number",
+    [
+      "ОБЛОМКИ ПЕРЕКРЫЛИ ПУТЬ",
+      "ОН ПОСЛАЛ ПЕРВУЮ АТАКУ",
+      "РАССЕКИ ЕГО ОКОВЫ",
+      "ТЕПЕРЬ ЭТО ТВОЁ ПРОСТРАНСТВО",
+    ][index],
+  );
   text(
     "lesson-title",
     [
-      "Поймай. Взмахни. Отпусти.",
-      "Поставь щит на пути атаки.",
-      "Проведи разрез через цель.",
+      "Сожми пространство.",
+      "Отрази его силу.",
+      "Оставь трещину в реальности.",
+      "Начерти свою территорию.",
     ][index],
   );
   text(
     "lesson-instruction",
     [
-      "Наведи курсор на синий снаряд и соедини два пальца. Взмахни к глазу наверху и отпусти щипок, пока рука движется.",
-      "Раскрой ладонь и поставь курсор на пунктирную траекторию. Дождись попадания в щит. Важна позиция руки.",
-      "Раскрой ладонь. Быстро проведи курсором через кристалл. Можно двигаться горизонтально, вертикально или по диагонали.",
+      "Покажи ладонь, затем сожми кулак рядом с обломками. Дождись яркого кольца и полностью раскрой ладонь — выпусти волну.",
+      "Поставь открытую ладонь на светящуюся траекторию снаряда. Печать примет удар. Подними её перед попаданием, чтобы отразить атаку.",
+      "Удержи указательный и средний пальцы. Когда печать загорится, проведи ими через кристалл. Можно раскрыть ладонь во время взмаха.",
+      "Сблизь две открытые ладони. Щипком нарисуй крупный круг и отпусти пальцы. Затем раскрой обе ладони и разведи их в стороны.",
     ][index],
   );
-  const drawing =
-    index === 0
-      ? '<path class="demo-guide" d="M90 115 L230 42"/><circle class="demo-pinch-ring demo-pinch-dot" cx="110" cy="96" r="10"/><ellipse class="demo-guide" cx="232" cy="40" rx="23" ry="12"/><text class="demo-small" x="60" y="151">ЩИПОК → ВЗМАХ → ОТПУСТИ</text>'
-      : index === 1
-        ? `<g transform="translate(55 0)">${palmDrawing}<circle class="demo-shield" cx="103" cy="83" r="62"/></g>`
-        : `<path class="demo-guide" d="M40 92 H280"/><path fill="#9e62b0" stroke="#e5b4f7" d="M210 48 L233 85 L210 121 L187 85 Z"/><g transform="translate(60 0)"><g class="demo-swipe">${palmDrawing}</g></g>`;
-  el("lesson-animation").innerHTML =
-    `<svg viewBox="0 0 320 170" role="img" aria-label="Показ движения">${drawing}</svg>`;
+  el("lesson-animation").innerHTML = lessonArt(lesson);
   el("lesson-demo").dataset.phase = "demo";
   text("lesson-arm", "Посмотри движение · 3");
   el("lesson-arm-progress").style.width = "0%";
@@ -222,15 +243,20 @@ function startPractice() {
   el("progress-fill").style.width = "0%";
   hint(
     [
-      "Наведи курсор на синий снаряд и соедини большой и указательный пальцы",
+      "Покажи ладонь, затем удержи кулак рядом с обломками и раскрой его.",
       "Останови снаряд щитом: раскрой ладонь на пунктирной траектории",
-      "Быстро проведи открытой ладонью через кристалл",
+      "Удержи указательный и средний пальцы, затем проведи разрез через кристалл.",
+      "Сблизь две открытые ладони, затем нарисуй круг щипком.",
     ][lessons.indexOf(practiceList[lessonIndex])],
     performance.now(),
     true,
   );
 }
 function ready() {
+  trained = true;
+  try {
+    localStorage.setItem("rift.ritual.trained", "yes");
+  } catch {}
   mode = "ready";
   world = null;
   clearMotion();
@@ -278,7 +304,7 @@ function startBattle() {
   text("spell-name", "СВОБОДНЫЙ БОЙ");
   spellbook();
   hint(
-    "Лови синие снаряды. Щит ставь на пути атаки. Разрезом пересекай кристаллы.",
+    "Собирай врагов сжатием, отражай атаки и разрывай пространство.",
     performance.now(),
     true,
   );
@@ -298,7 +324,7 @@ function showResult() {
   runs = runs.slice(-8);
   try {
     saveBest(localStorage, bestScore);
-    localStorage.setItem("rift.runs.v2", JSON.stringify(runs));
+    localStorage.setItem("rift.runs.v3", JSON.stringify(runs));
   } catch {
     /* Keep progress for this session. */
   }
@@ -333,7 +359,7 @@ function showResult() {
   text("duration-label", "ЛУЧШАЯ СЕРИЯ");
   text(
     "result-detail",
-    `Возвраты: ${world.stats.returns}/${world.stats.throws} · Блоки: ${world.stats.blocks} · Парирования: ${world.stats.parries} · Разрезы в цель: ${world.stats.cutHits}/${world.stats.cuts}`,
+    `Волны в цель: ${world.stats.burstHits}/${world.stats.bursts} · Отражения: ${world.stats.parries} · Разрезы: ${world.stats.cutHits}/${world.stats.cuts} · Территории: ${world.stats.domains}`,
   );
   text("advice-title", recommendation.title);
   text("advice-detail", recommendation.detail);
@@ -371,7 +397,7 @@ function shutdown(message = "Камера выключена. Можно нач�
   el("recalibrate").hidden = true;
   const start = el<HTMLButtonElement>("start");
   start.disabled = false;
-  text("start", "Пробудить силу ↗");
+  text("start", "Войти в разлом ↗");
   text("setup-note", message);
   text("camera-badge", "КАМЕРА ВЫКЛ.");
   text("arena-status", "ОЖИДАНИЕ МАГА");
@@ -385,6 +411,7 @@ el("start").addEventListener("click", async () => {
   text("start", "Подключаем камеру…");
   text("setup-note", "Разреши доступ в окне браузера.");
   void sound.unlock();
+  void enterFullscreen();
   try {
     if (!navigator.mediaDevices?.getUserMedia)
       throw new Error("Для камеры открой сайт через HTTPS или localhost.");
@@ -446,7 +473,7 @@ el("start").addEventListener("click", async () => {
     lastInference = 0;
     el("recalibrate").hidden = false;
     document.body.classList.add("camera-on");
-    beginCalibration();
+    beginAwakening();
   } catch (error) {
     if (token !== generation) return;
     const name = error instanceof Error ? error.name : "";
@@ -463,6 +490,50 @@ el("start").addEventListener("click", async () => {
     console.error(error);
     shutdown(message);
   }
+});
+async function enterFullscreen() {
+  if (
+    !document.fullscreenElement &&
+    document.documentElement.requestFullscreen
+  ) {
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch {
+      /* The viewport remains immersive when fullscreen is unavailable. */
+    }
+  }
+}
+el("fullscreen").addEventListener("click", () => {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void enterFullscreen();
+});
+document.addEventListener("fullscreenchange", () => {
+  text(
+    "fullscreen",
+    document.fullscreenElement ? "⤢ В окно" : "⤢ На весь экран",
+  );
+});
+function beginAwakening() {
+  mode = "awakening";
+  awakening = new Awakening();
+  awakeningDoneAt = 0;
+  clearMotion();
+  hidePanels();
+  el("awakening").hidden = false;
+  el("skip-intro").hidden = true;
+  el("skip-training").hidden = !trained;
+  text("arena-status", "ПО ТУ СТОРОНУ");
+  text("counter", "ПРОБУЖДЕНИЕ");
+  sound.effect({ type: "phase", position: { x: 0.5, y: 0.2 } });
+}
+el("skip-intro").addEventListener("click", () => beginTraining());
+el("skip-training").addEventListener("click", () => {
+  if (trained) startBattle();
+});
+el("help").addEventListener("click", () => {
+  const open = document.body.classList.toggle("help-open");
+  el("help").setAttribute("aria-expanded", String(open));
+  clearMotion();
 });
 el("stop").addEventListener("click", () => shutdown());
 el("default-calibration").addEventListener("click", () =>
@@ -484,6 +555,9 @@ document.addEventListener("visibilitychange", () => {
   clearMotion();
   hand = null;
   tutorial.pause();
+  world?.magic.reset();
+  awakening.hold = 0;
+  awakening.armed = false;
   calibrator.fistMs = 0;
   lastFrame = performance.now();
   if (document.hidden) sound.suspend();
@@ -510,8 +584,13 @@ function infer(now: number): boolean {
   lastInference = now;
   lastVideo = video.currentTime;
   let landmarks: Point[][];
+  let sides: (string | null)[] = [];
   try {
-    landmarks = model.detectForVideo(video, now).landmarks;
+    const detected = model.detectForVideo(video, now);
+    landmarks = detected.landmarks;
+    sides = (detected.handedness ?? []).map((categories) =>
+      categories[0]?.score >= 0.7 ? categories[0].categoryName : null,
+    );
   } catch (error) {
     console.error(error);
     shutdown("Распознавание остановилось. Включи камеру снова.");
@@ -520,19 +599,8 @@ function infer(now: number): boolean {
   const hands = landmarks.map((points) =>
     describeHand(points, video.videoWidth / video.videoHeight),
   );
-  let index = 0;
-  if (previousPalm && hands.length > 1) {
-    const d = (candidate: Hand | null) =>
-      candidate
-        ? Math.hypot(
-            (candidate.palm ?? candidate.cursor).x - previousPalm!.x,
-            (candidate.palm ?? candidate.cursor).y - previousPalm!.y,
-          )
-        : Infinity;
-    if (d(hands[1]) < d(hands[0])) index = 1;
-  }
-  hand = hands[index] ?? null;
-  previousPalm = hand?.palm ?? hand?.cursor ?? null;
+  const index = castingHand.choose(hands, sides);
+  hand = index < 0 ? null : (hands[index] ?? null);
   control = motion.update(hand, hands[1 - index] ?? null, now, calibration);
   text(
     "tracking-status",
@@ -565,7 +633,29 @@ function infer(now: number): boolean {
       sk.fill();
     });
   });
-  if (mode === "calibration") {
+  if (document.body.classList.contains("help-open")) return true;
+  if (mode === "awakening") {
+    awakening.update(control, dt);
+    text("awakening-hint", awakening.hint);
+    text(
+      "awakening-title",
+      awakening.armed
+        ? "Разорви завесу."
+        : awakening.elapsed < 4200
+          ? "Он уже здесь."
+          : "Сложи первую печать.",
+    );
+    el("awakening").dataset.stage = awakening.armed ? "spread" : "sign";
+    el("awakening-progress").style.width =
+      `${Math.min(100, awakening.armed ? awakening.spread * 100 : awakening.hold / 6.5)}%`;
+    el("skip-intro").hidden = awakening.elapsed < 4200;
+    if (awakening.complete && !awakeningDoneAt) {
+      awakeningDoneAt = now + 1400;
+      scene.emit([{ type: "burst", position: { x: 0.5, y: 0.4 }, power: 1 }]);
+      sound.effect({ type: "domain", position: { x: 0.5, y: 0.4 } });
+    }
+    if (awakeningDoneAt && now >= awakeningDoneAt) beginTraining();
+  } else if (mode === "calibration") {
     calibrator.update(hand, dt);
     const p = hand?.palm ?? { x: 0.5, y: 0.5 },
       b = calibrator.bounds;
@@ -634,6 +724,10 @@ function infer(now: number): boolean {
 }
 function updateHud(now: number) {
   if (!world) return;
+  if (mode === "practice" && world.practiceDone) {
+    hint("Печать принята. Сила подчинилась тебе.", now, true);
+    return;
+  }
   if (mode === "battle") {
     const seconds = Math.ceil(world.remainingMs / 1000);
     text(
@@ -677,15 +771,15 @@ function updateHud(now: number) {
     text("battle-message", "Пауза · верни руку целиком в кадр");
     text(
       "spell-name",
-      world.held
-        ? "ТЕЛЕКИНЕЗ · СНАРЯД В РУКЕ"
+      world.magic.label
+        ? world.magic.label
         : world.shieldActive
           ? "ЩИТ АКТИВЕН"
           : "СВОБОДНЫЙ БОЙ",
     );
     text(
       "progress-label",
-      world.domainHold > 0
+      world.magic.domainHold > 0
         ? "РАСШИРЕНИЕ…"
         : world.domainMs > 0
           ? "ВРЕМЯ ЗАМЕДЛЕНО"
@@ -694,20 +788,26 @@ function updateHud(now: number) {
             : "ВЫБИРАЙ СПОСОБНОСТЬ",
     );
     el("progress-fill").style.width =
-      `${world.domainHold > 0 ? world.domainHold / 10 : world.held ? Math.min(100, world.heldMs / 6.5) : world.shieldActive ? world.shieldEnergy : world.energy}%`;
+      `${world.magic.domainHold > 0 ? world.magic.domainHold / 7 : world.magic.progress ? world.magic.progress * 100 : world.shieldActive ? world.shieldEnergy : world.energy}%`;
   }
   if (mode === "practice" && !world.practiceDone) {
-    const instruction =
-      world.practice === "pinch"
-        ? world.held
-          ? "Теперь взмахни к глазу и отпусти пальцы во время движения"
-          : "Наведи курсор на синий снаряд и соедини большой и указательный пальцы"
-        : world.practice === "shield"
-          ? "Раскрой ладонь на пунктирной траектории и дождись снаряда"
-          : "Быстро проведи открытой ладонью прямо через кристалл";
+    const instruction = {
+      vortex:
+        "Покажи ладонь → сожми кулак у обломков → раскрой ладонь для выброса.",
+      shield: "Поставь открытую ладонь на траекторию и дождись атаки.",
+      swipe:
+        "Удержи указательный и средний пальцы, затем проведи ими через кристалл.",
+      domain: "Сблизь две ладони → круг щипком → разведи открытые ладони.",
+    }[world.practice!];
+    text(
+      "spell-name",
+      world.magic.label || names[lessons.indexOf(world.practice!)],
+    );
+    el("progress-fill").style.width = `${world.magic.progress * 100}%`;
     hint(
       control.quality ??
-        (world.elapsed < world.hintUntil ? world.hint : instruction),
+        (world.magic.hint ||
+          (world.elapsed < world.hintUntil ? world.hint : instruction)),
       now,
     );
   } else hint(control.quality ?? world.hint, now);
@@ -723,7 +823,12 @@ function frame(now: number) {
       }
       infer(now);
       if ((mode === "battle" || mode === "practice") && world) {
-        world.tick(dt, control);
+        world.tick(
+          Math.min(dt, 100),
+          document.body.classList.contains("help-open")
+            ? emptyControl()
+            : control,
+        );
         control = { ...control, released: false, slash: null };
         const events = world.drainEvents();
         scene.emit(events);
@@ -760,11 +865,22 @@ function frame(now: number) {
       }
     }
     if (now > cinematicUntil) el("cinematic").hidden = true;
+    sound.charge(world && !world.paused ? world.magic.charge : 0);
     sound.update(
       mode === "battle" && !!world && !world.paused && !world.ended,
       world?.phase ?? 0,
       !!world?.domainMs,
     );
+    scene.presentation = {
+      mode,
+      reveal:
+        mode === "awakening"
+          ? Math.min(1, awakening.elapsed / 4200)
+          : mode === "idle" || mode === "loading"
+            ? 0
+            : 1,
+      tear: awakening.complete ? 1 : awakening.spread,
+    };
     scene.draw(world, control, now);
   }
   requestAnimationFrame(frame);

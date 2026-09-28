@@ -5,6 +5,7 @@ export type Hand = {
   pinchRatio: number;
   extended: number;
   open: boolean;
+  bladeSign?: boolean;
   quality: string | null;
 };
 
@@ -36,11 +37,12 @@ export function describeHand(points: Point[], aspect = 4 / 3): Hand | null {
     return null;
   const p = points.map((point) => ({ x: point.x * aspect, y: point.y }));
   const scale = distance(p[0], p[9]);
-  const extended = [5, 9, 13, 17].filter(
+  const fingers = [5, 9, 13, 17].map(
     (i) =>
       angle(p[i], p[i + 1], p[i + 3]) > 150 &&
       distance(p[i + 3], p[0]) > distance(p[i + 1], p[0]) * 1.12,
-  ).length;
+  );
+  const extended = fingers.filter(Boolean).length;
   const pinchRatio = distance(p[4], p[8]) / Math.max(scale, 0.001);
   const thumbOpen = distance(p[4], p[5]) / Math.max(scale, 0.001) > 0.42;
   const clipped = points.some(
@@ -56,6 +58,7 @@ export function describeHand(points: Point[], aspect = 4 / 3): Hand | null {
       x: 1 - (points[4].x + points[8].x) / 2,
       y: (points[4].y + points[8].y) / 2,
     },
+    bladeSign: fingers[0] && fingers[1] && !fingers[2] && !fingers[3],
     pinchRatio,
     extended,
     open: extended === 4 && thumbOpen && pinchRatio > 0.5,
@@ -69,4 +72,4 @@ export function describeHand(points: Point[], aspect = 4 / 3): Hand | null {
   };
 }
 
-export type Lesson = "pinch" | "shield" | "swipe";
+export type Lesson = "vortex" | "shield" | "swipe" | "domain";

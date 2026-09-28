@@ -1,225 +1,244 @@
 import { expect, test, type Page } from "@playwright/test";
-
-// Only the landmark model is replaced. Geometry, momentum, collisions, coaching,
-// timers and UI are exercised unchanged. A separate test loads the actual model.
+// Only the landmark detector is replaced; gesture geometry, ritual state, physics
+// and all UI transitions run in production modules, with a read-only observer.
 const fakeModel = `
-export const FilesetResolver = { forVisionTasks: async () => ({}) };
-export const HandLandmarker = { createFromOptions: async () => ({ close() {}, detectForVideo(_video, now) {
-  const s = window.__testHand ?? { gesture: 'none', since: 0, point: {x:.5,y:.5} };
-  if (s.gesture === 'none') return {landmarks:[]};
-  let pose = s.gesture, point = {...s.point};
-  if (s.to) {
-    const t = Math.min(1,(now-s.since)/260);
-    point = {x:s.point.x+(s.to.x-s.point.x)*t,y:s.point.y+(s.to.y-s.point.y)*t};
-    if (pose === 'throw') pose = now-s.since < 145 ? 'pinch' : 'rest';
-  }
+export const FilesetResolver={forVisionTasks:async()=>({})};
+export const HandLandmarker={createFromOptions:async()=>({close(){},detectForVideo(_v,now){
+ const s=window.__testHand??{gesture:'none',point:{x:.5,y:.5},since:0};
+ function hand(pose,point){
+  if(pose==='none')return null;
   let p=[{x:.5,y:.8},{x:.4,y:.68},{x:.32,y:.6},{x:.26,y:.52},{x:.2,y:.43}];
-  for (const x of [.35,.42,.5,.58]) for (const y of [.52,.4,.3,.2]) p.push({x,y});
+  for(const x of [.35,.42,.5,.58])for(const y of [.52,.4,.3,.2])p.push({x,y});
   p=p.map(v=>({x:.5+(v.x-.5)*.6,y:.5+(v.y-.5)*.6,z:0}));
-  if(pose==='pinch') p[4]={x:p[8].x+.012,y:p[8].y+.004,z:0};
-  if(pose==='rest') for(const i of [5,9,13,17]) p[i+3]={...p[i],y:p[i].y+.04};
+  if(pose==='pinch')p[4]={x:p[8].x+.012,y:p[8].y+.004,z:0};
+  if(pose==='rest'||pose==='sign')for(const i of (pose==='sign'?[13,17]:[5,9,13,17]))p[i+3]={...p[i],y:p[i].y+.04};
   const dx=.5225-(.2+point.x*.6),dy=.23+point.y*.54-.554;
-  p=p.map(v=>({...v,x:v.x+dx,y:v.y+dy}));
-  return {landmarks:[p]};
-}}) };
-`;
+  return p.map(v=>({...v,x:v.x+dx,y:v.y+dy}));
+ }
+ let point={...s.point};
+ if(s.to){const f=Math.min(1,(now-s.since)/300);point={x:s.point.x+(s.to.x-s.point.x)*f,y:s.point.y+(s.to.y-s.point.y)*f};}
+ if(s.circle){const a=Math.min(1,(now-s.since)/2700)*Math.PI*2*s.circle;point={x:.5+Math.cos(a)*.23,y:.52+Math.sin(a)*.23/.7};}
+ return {landmarks:[hand(s.gesture,point),s.second?hand(s.second.gesture,s.second.point):null].filter(Boolean)};
+}})};`;
 async function gesture(
   page: Page,
   gesture: string,
   point = { x: 0.5, y: 0.5 },
-  to?: { x: number; y: number },
+  extra: Record<string, unknown> = {},
 ) {
   await page.evaluate(
     (data) => {
       (window as any).__testHand = { ...data, since: performance.now() };
     },
-    { gesture, point, to },
+    { gesture, point, ...extra },
   );
 }
-async function prepare(page: Page) {
-  await expect(page.locator("#lesson-demo")).toHaveAttribute(
-    "data-phase",
-    "prepare",
-    { timeout: 7000 },
-  );
-  await gesture(page, "rest");
-  await expect(page.locator("#lesson-demo")).toBeHidden();
-}
-async function observeArena(page: Page) {
-  // Instrument the module the app actually loads, including Vite HMR queries.
+async function observer(page: Page) {
   await page.route("**/src/game/arena.ts*", async (route) => {
-    const response = await route.fetch();
-    const source = await response.text();
+    const response = await route.fetch(),
+      source = await response.text();
     await route.fulfill({
       response,
       contentType: "application/javascript",
       body:
         source +
-        `
-    const original = Arena.prototype.tick;
-    Arena.prototype.tick = function (...args) {
-      const value = original.apply(this, args);
-      window.__snapshot = {
-        status: this.status,
-        practice: this.practice,
-        phase: this.phase,
-        held: !!this.held,
-        entities: this.entities.map((e) => ({ ...e })),
-        score: this.score,
-      };
-      return value;
-    };`,
+        `\nconst original=Arena.prototype.tick;
+  Arena.prototype.tick=function(...args){const result=original.apply(this,args);window.__snapshot={status:this.status,practice:this.practice,done:this.practiceDone,score:this.score,elapsed:this.elapsed,stats:{...this.stats},stage:this.magic.stage,vortex:!!this.magic.vortex,blade:this.magic.bladeMs,entities:this.entities.map(e=>({...e}))};return result;};`,
     });
   });
 }
-async function train(page: Page) {
+async function contained(page: Page, selector: string) {
+  const rect = await page.locator(selector).boundingBox();
+  const viewport = await page.evaluate(() => ({
+    width: innerWidth,
+    height: innerHeight,
+  }));
+  expect(rect).not.toBeNull();
+  expect(rect!.x).toBeGreaterThanOrEqual(0);
+  expect(rect!.y).toBeGreaterThanOrEqual(0);
+  expect(rect!.x + rect!.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(rect!.y + rect!.height).toBeLessThanOrEqual(viewport.height + 1);
+}
+async function setup(page: Page) {
   await page.route("**/@mediapipe_tasks-vision.js*", (route) =>
     route.fulfill({ contentType: "application/javascript", body: fakeModel }),
   );
-  await observeArena(page);
+  await observer(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Пробудить силу" }).click();
-  await expect(page.locator("#calibration")).toBeVisible();
-  await page
-    .getByRole("button", { name: "Использовать стандартный размах" })
-    .click();
-  await prepare(page);
-  await gesture(page, "pinch", { x: 0.3, y: 0.55 });
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__snapshot?.held))
-    .toBe(true);
-  await page.waitForTimeout(700);
-  await gesture(page, "throw", { x: 0.3, y: 0.55 }, { x: 0.5, y: 0.22 });
-  await expect(page.locator("#lesson-title")).toHaveText(
-    "Поставь щит на пути атаки.",
-  );
-  // The same open palm must not silently complete the next lesson.
-  await gesture(page, "open");
+  await page.getByRole("button", { name: "Войти в разлом" }).click();
+  await expect(page.locator("#awakening")).toBeVisible();
+}
+async function prepare(page: Page) {
   await expect(page.locator("#lesson-demo")).toHaveAttribute(
     "data-phase",
     "prepare",
-    { timeout: 7000 },
+    { timeout: 8000 },
   );
-  await page.waitForTimeout(900);
+  await gesture(page, "rest");
+  await expect(page.locator("#lesson-demo")).toBeHidden();
+}
+async function palms(page: Page, apart = false) {
+  await gesture(
+    page,
+    "open",
+    { x: apart ? 0.16 : 0.4, y: 0.5 },
+    { second: { gesture: "open", point: { x: apart ? 0.84 : 0.6, y: 0.5 } } },
+  );
+}
+async function drawCircle(page: Page, fraction = 1) {
+  await gesture(page, "pinch", { x: 0.73, y: 0.52 }, { circle: fraction });
+  await page.waitForTimeout(2850);
+  await gesture(page, "open");
+}
+
+test("immersive awakening → four physical lessons → battle → report and repeat", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.screenshot({ path: "test-results/entry.png" });
+  await setup(page);
+  await expect(page.locator("#skip-intro")).toBeVisible({ timeout: 10000 });
+  await gesture(
+    page,
+    "sign",
+    { x: 0.4, y: 0.5 },
+    { second: { gesture: "sign", point: { x: 0.6, y: 0.5 } } },
+  );
+  await expect(page.locator("#awakening")).toHaveAttribute(
+    "data-stage",
+    "spread",
+  );
+  await page.screenshot({ path: "test-results/awakening.png" });
+  await gesture(
+    page,
+    "sign",
+    { x: 0.16, y: 0.5 },
+    { second: { gesture: "sign", point: { x: 0.84, y: 0.5 } } },
+  );
+  await expect(page.locator("#lesson-title")).toHaveText("Сожми пространство.");
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await contained(page, "#lesson-demo");
+  await contained(page, ".camera-card");
+  await page.screenshot({ path: "test-results/lesson-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await prepare(page);
+  // The fist used to confirm the lesson must not silently trigger compression.
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => (window as any).__snapshot.vortex)).toBe(
+    false,
+  );
+  await gesture(page, "open");
+  await page.waitForTimeout(220);
+  await gesture(page, "rest");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.vortex))
+    .toBe(true);
+  await page.waitForTimeout(1100);
+  await page.screenshot({ path: "test-results/vortex.png" });
+  await gesture(page, "open");
+  await expect(page.locator("#lesson-title")).toHaveText("Отрази его силу.");
+  await page.waitForTimeout(700);
   await expect(page.locator("#lesson-demo")).toBeVisible();
   await prepare(page);
   await gesture(page, "open", { x: 0.6, y: 0.64 });
   await expect(page.locator("#lesson-title")).toHaveText(
-    "Проведи разрез через цель.",
-    { timeout: 8000 },
+    "Оставь трещину в реальности.",
+    { timeout: 9000 },
   );
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({
-    path: "test-results/tutorial-mobile.png",
-    fullPage: true,
-  });
   await prepare(page);
-  await gesture(page, "open", { x: 0.25, y: 0.25 });
-  await page.waitForTimeout(260);
-  await gesture(page, "open", { x: 0.25, y: 0.25 }, { x: 0.75, y: 0.25 });
-  await page.waitForTimeout(500);
-  await expect(page.locator("#result")).toBeHidden();
-  expect(await page.evaluate(() => (window as any).__snapshot.practice)).toBe(
-    "swipe",
+  await gesture(page, "open", { x: 0.2, y: 0.5 });
+  await page.waitForTimeout(350);
+  await gesture(page, "open", { x: 0.2, y: 0.5 }, { to: { x: 0.8, y: 0.5 } });
+  await page.waitForTimeout(650);
+  expect(await page.evaluate(() => (window as any).__snapshot.done)).toBe(
+    false,
   );
-  await gesture(page, "open", { x: 0.25, y: 0.5 });
-  await page.waitForTimeout(400);
-  await gesture(page, "open", { x: 0.25, y: 0.5 }, { x: 0.75, y: 0.5 });
+  await gesture(page, "sign", { x: 0.2, y: 0.5 });
+  await page.waitForTimeout(600);
+  await gesture(page, "sign", { x: 0.2, y: 0.5 }, { to: { x: 0.8, y: 0.5 } });
+  await expect(page.locator("#lesson-title")).toHaveText(
+    "Начерти свою территорию.",
+  );
+  await prepare(page);
+  await palms(page);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
+    .toBe("draw");
+  await drawCircle(page, 0.7);
+  await expect(page.locator("#hint")).toContainText("Соедини");
+  await drawCircle(page);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
+    .toBe("release");
+  await page.screenshot({ path: "test-results/seal.png" });
+  await palms(page, true);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stats.domains))
+    .toBe(1);
+  await page.screenshot({ path: "test-results/territory.png" });
   await expect(page.locator("#result")).toBeVisible();
-  await expect(page.locator("#result-title")).toHaveText("Теперь удержи тьму.");
-  await page.setViewportSize({ width: 1440, height: 1050 });
-}
-async function startWithPalm(page: Page) {
   await gesture(page, "none");
   await expect(page.locator("#restart-hint")).toContainText("Удерживай");
   await gesture(page, "open");
   await expect(page.locator("#result")).toBeHidden();
   await expect(page.locator("#countdown")).toBeHidden({ timeout: 6500 });
-}
-
-test("spatial training → free battle → pause → result and personalized drill", async ({
-  page,
-}) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await train(page);
-  await startWithPalm(page);
   await gesture(page, "none");
   await expect(page.locator("#battle-message")).toContainText("Пауза");
   const time = await page.locator("#time-left").textContent();
-  await page.waitForTimeout(1100);
-  await expect(page.locator("#time-left")).toHaveText(time!);
-  await gesture(page, "rest");
-  // Observe entities without changing game state, then physically intercept an attack.
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (window as any).__snapshot?.entities.some(
-          (e: any) => e.kind === "orb" && e.telegraph <= 0,
-        ),
-      ),
-    )
-    .toBe(true);
-  const orb = await page.evaluate(() =>
-    (window as any).__snapshot.entities.find(
-      (e: any) => e.kind === "orb" && e.telegraph <= 0,
-    ),
-  );
-  await gesture(page, "pinch", { x: orb.x, y: orb.y });
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__snapshot.held))
-    .toBe(true);
-  // Bring the captured projectile down before winding up: a spawn close to
-  // the boss otherwise produces almost no hand travel and a weak throw.
-  await gesture(page, "pinch", { x: 0.3, y: 0.55 });
   await page.waitForTimeout(700);
-  await gesture(page, "throw", { x: 0.3, y: 0.55 }, { x: 0.5, y: 0.22 });
+  await expect(page.locator("#time-left")).toHaveText(time!);
+  await gesture(page, "open", { x: 0.5, y: 0.35 });
+  await page.waitForTimeout(250);
+  await gesture(page, "rest", { x: 0.5, y: 0.35 });
+  await page.waitForTimeout(1800);
+  await gesture(page, "open");
   await expect
     .poll(() => page.evaluate(() => (window as any).__snapshot.score))
     .toBeGreaterThan(0);
-  await page.screenshot({
-    path: "test-results/arena-desktop.png",
-    fullPage: true,
+  await page.screenshot({ path: "test-results/battle.png" });
+  // Leaving fullscreen keeps the complete game contained in the window.
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(300);
-  await page.screenshot({
-    path: "test-results/arena-mobile.png",
-    fullPage: true,
-  });
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: "test-results/battle-mobile.png" });
   expect(
     await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
+      () =>
+        document.documentElement.scrollWidth <= innerWidth &&
+        document.documentElement.scrollHeight <= innerHeight,
     ),
   ).toBe(true);
   await gesture(page, "rest");
-  await expect(page.locator("#result")).toBeVisible({ timeout: 65000 });
-  await expect(page.locator("#report")).toBeVisible();
+  await expect(page.locator("#result")).toBeVisible({ timeout: 85000 });
   await expect(page.locator("#advice-detail")).not.toBeEmpty();
-  const best = await page.locator("#best-score").textContent();
-  await page.screenshot({
-    path: "test-results/report-mobile.png",
-    fullPage: true,
-  });
+  await page.screenshot({ path: "test-results/report-mobile.png" });
   await gesture(page, "none");
   await expect(page.locator("#restart-hint")).toContainText("Кулак");
   await gesture(page, "rest");
   await expect(page.locator("#lesson-demo")).toBeVisible();
   await expect(page.locator("#arena-status")).toHaveText("ЛИЧНАЯ ТРЕНИРОВКА");
   await page.reload();
-  await expect(page.locator("#best-score")).toHaveText(best!);
+  await page.getByRole("button", { name: "Войти в разлом" }).click();
+  await expect(page.locator("#skip-training")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
-test("real model initializes, camera shuts down, and denied permission is recoverable", async ({
+test("real model loads, camera shuts down, permission refusal can be retried", async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
-  await page.getByRole("button", { name: "Пробудить силу" }).click();
-  await expect(page.locator("#calibration")).toBeVisible({ timeout: 60000 });
-  await page.getByRole("button", { name: "Выключить камеру" }).click();
+  await page.locator("#start").click();
+  await expect(page.locator("#awakening")).toBeVisible({ timeout: 60000 });
+  await page.locator("#stop").click();
   expect(
     await page
       .locator("#camera")
@@ -231,21 +250,35 @@ test("real model initializes, camera shuts down, and denied permission is recove
     };
   });
   await page.reload();
-  await page.getByRole("button", { name: "Пробудить силу" }).click();
+  await page.locator("#start").click();
   await expect(page.locator("#setup-note")).toContainText("настройках сайта");
   await expect(page.locator("#start")).toBeEnabled();
   expect(errors).toEqual([]);
 });
 
-test("comfortable-range calibration can be completed entirely by hand", async ({
+test("help pauses combat; calibration, sound and fullscreen fallback remain usable", async ({
   page,
 }) => {
-  await page.route("**/@mediapipe_tasks-vision.js*", (route) =>
-    route.fulfill({ contentType: "application/javascript", body: fakeModel }),
+  await page.addInitScript(() => {
+    localStorage.setItem("rift.ritual.trained", "yes");
+    Element.prototype.requestFullscreen = async () => {
+      throw new DOMException("Unsupported", "NotAllowedError");
+    };
+  });
+  await setup(page);
+  await page.locator("#skip-training").click();
+  await gesture(page, "open");
+  await expect(page.locator("#countdown")).toBeHidden({ timeout: 7000 });
+  await page.locator("#help").click();
+  const elapsed = await page.evaluate(() => (window as any).__snapshot.elapsed);
+  await page.waitForTimeout(550);
+  expect(await page.evaluate(() => (window as any).__snapshot.elapsed)).toBe(
+    elapsed,
   );
-  await page.goto("/");
-  await page.getByRole("button", { name: "Пробудить силу" }).click();
+  await page.locator("#recalibrate").click();
   await expect(page.locator("#calibration")).toBeVisible();
+  await contained(page, "#calibration");
+  await page.screenshot({ path: "test-results/calibration.png" });
   for (const point of [
     { x: 0.2, y: 0.3 },
     { x: 0.8, y: 0.3 },
@@ -253,57 +286,12 @@ test("comfortable-range calibration can be completed entirely by hand", async ({
     { x: 0.2, y: 0.75 },
   ]) {
     await gesture(page, "open", point);
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(650);
   }
   await expect(page.locator("#calibration")).toHaveClass(/calibrated/);
   await gesture(page, "rest");
   await expect(page.locator("#lesson-demo")).toBeVisible();
-  await page.getByRole("button", { name: "ЗВУК ВКЛ." }).click();
+  await page.locator("#sound").click();
   await expect(page.locator("#sound")).toHaveAttribute("aria-pressed", "false");
-});
-
-test("boss and domain render using real arena state", async ({ page }) => {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    const arenaModule = "/src/game/arena.ts",
-      sceneModule = "/src/game/scene.ts",
-      controlModule = "/src/game/control.ts";
-    const [{ Arena }, { Scene }, { emptyControl }] = await Promise.all([
-      import(arenaModule),
-      import(sceneModule),
-      import(controlModule),
-    ]);
-    const canvas = document.createElement("canvas");
-    canvas.id = "domain-proof";
-    Object.assign(canvas.style, {
-      position: "fixed",
-      inset: "0",
-      width: "900px",
-      height: "700px",
-      zIndex: "9999",
-      background: "#101019",
-    });
-    document.body.append(canvas);
-    const arena = new Arena();
-    arena.status = "fighting";
-    arena.elapsed = 70000;
-    arena.energy = 100;
-    const control = {
-      ...emptyControl(),
-      valid: true,
-      domainPose: true,
-      position: { x: 0.5, y: 0.6 },
-    };
-    arena.tick(1100, control);
-    if (arena.stats.domains !== 1 || arena.domainMs <= 0)
-      throw new Error("Domain did not activate");
-    arena.spawn("orb", { x: 0.25, y: 0.4 });
-    arena.spawn("armored", { x: 0.75, y: 0.45 });
-    const renderer = new Scene(canvas);
-    renderer.emit(arena.drainEvents());
-    renderer.draw(arena, control, 1000);
-  });
-  await page
-    .locator("#domain-proof")
-    .screenshot({ path: "test-results/domain.png" });
+  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
 });
