@@ -82,4 +82,12 @@ describe('gesture lessons', () => {
     interrupted.update('swipe', null, 150);
     expect(interrupted.update('swipe', hand({ cursor: { x: 0.8, y: 0.5 } }), 200).success).toBe(false);
   });
+
+  it('recognizes a sweep after stationary frames and a short preparatory movement', () => {
+    const lesson = new GestureLesson();
+    for (let t = 100; t <= 600; t += 50) lesson.update('swipe', hand({ cursor: { x: 0.635, y: 0.5 } }), t);
+    let success = false;
+    for (let i = 0; i <= 6; i++) success ||= lesson.update('swipe', hand({ cursor: { x: 0.485 + i * 0.05, y: 0.5 } }), 650 + i * 50).success;
+    expect(success).toBe(true);
+  });
 });

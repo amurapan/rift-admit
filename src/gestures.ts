@@ -99,12 +99,17 @@ export class GestureLesson {
     }
     this.samples.push({ ...hand.cursor, time: now });
     this.samples = this.samples.filter(sample => now - sample.time <= 450);
-    const first = this.samples[0];
-    const travel = Math.abs(hand.cursor.x - first.x);
-    const elapsed = (now - first.time) / 1000;
-    const vertical = Math.abs(hand.cursor.y - first.y);
-    const success = elapsed >= 0.1 && travel >= 0.24 && travel / elapsed >= 0.65 && vertical < 0.18;
+    // A sweep can start anywhere inside the window. Using only its oldest frame
+    // dilutes fast movement with the stationary frames immediately before it.
+    const candidates = this.samples.map(sample => ({
+      travel: Math.abs(hand.cursor.x - sample.x),
+      elapsed: (now - sample.time) / 1000,
+      vertical: Math.abs(hand.cursor.y - sample.y),
+    }));
+    const success = candidates.some(sample => sample.elapsed >= 0.1 && sample.travel >= 0.24 && sample.travel / sample.elapsed >= 0.65 && sample.vertical < 0.18);
+    if (success) return read('Кристалл разрушен', 1, true);
+    const { travel, vertical } = candidates.reduce((best, candidate) => candidate.travel > best.travel ? candidate : best);
     if (vertical >= 0.18) return read('Проведи ладонью горизонтально, слева направо или обратно', travel / 0.24);
-    return read(success ? 'Кристалл разрушен' : travel > 0.07 ? 'Взмахни шире и быстрее — примерно на треть кадра' : 'Резко проведи открытой ладонью в сторону', travel / 0.24, success);
+    return read(travel > 0.07 ? 'Взмахни шире и быстрее — примерно на треть кадра' : 'Резко проведи открытой ладонью в сторону', travel / 0.24);
   }
 }

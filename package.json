@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "assets": "node scripts/prepare-assets.mjs",
     "postinstall": "npm run assets"
   },
@@ -15,6 +16,7 @@
     "@mediapipe/tasks-vision": "^1.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"
