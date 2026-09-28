@@ -12,7 +12,11 @@ import {
 } from "./game/control";
 import { HandOverlay } from "./game/pointer";
 import { Scene } from "./game/scene";
-import { CastingHand, CursorFollower } from "./game/tracking";
+import {
+  CastingHand,
+  CursorFollower,
+  TrackingContinuity,
+} from "./game/tracking";
 import { lessonArt } from "./game/lesson-art";
 import { Awakening } from "./game/ritual";
 import { Sound } from "./game/audio";
@@ -71,6 +75,7 @@ let control = emptyControl();
 let hand: Hand | null = null;
 const castingHand = new CastingHand();
 const cursors = new CursorFollower();
+const continuity = new TrackingContinuity();
 const handOverlay = new HandOverlay();
 let calibrator = new Calibrator();
 let calibration: Calibration = { ...DEFAULT_CALIBRATION };
@@ -159,6 +164,7 @@ function spellbook(active = -1) {
 function clearMotion(invalidateDetection = true) {
   if (invalidateDetection) model?.invalidate();
   cursors.reset();
+  continuity.reset();
   handOverlay.reset();
   motion.reset();
   control = emptyControl();
@@ -583,23 +589,33 @@ function acceptDetection(detected: Detection) {
   lastInference = now;
   const { landmarks, sides, width, height } = detected;
   const hands = landmarks.map((points) => describeHand(points, width / height));
-  const index = castingHand.choose(hands, sides);
+  const index = castingHand.choose(hands, sides, now);
   hand = index < 0 ? null : (hands[index] ?? null);
-  control = motion.update(hand, hands[1 - index] ?? null, now, calibration);
+  control = continuity.update(
+    motion.update(
+      hand,
+      index < 0 ? null : (hands[1 - index] ?? null),
+      now,
+      calibration,
+    ),
+    performance.now(),
+  );
   cursors.sample(control, now);
-  handOverlay.sample(
-    index < 0
-      ? []
-      : [
-          landmarks[index],
-          ...(landmarks[1 - index] ? [landmarks[1 - index]] : []),
-        ],
-    now,
-  );
-  text(
-    "tracking-status",
-    hand ? (hand.quality ?? "✧ РУКА РАСПОЗНАНА") : "✧ ПОКАЖИ РУКУ В КАДРЕ",
-  );
+  if (!control.trackingGrace)
+    handOverlay.sample(
+      index < 0
+        ? []
+        : [
+            landmarks[index],
+            ...(landmarks[1 - index] ? [landmarks[1 - index]] : []),
+          ],
+      now,
+    );
+  if (!control.trackingGrace)
+    text(
+      "tracking-status",
+      hand ? (hand.quality ?? "✧ РУКА РАСПОЗНАНА") : "✧ ПОКАЖИ РУКУ В КАДРЕ",
+    );
   if (document.body.classList.contains("help-open")) return true;
   if (mode === "awakening") {
     awakening.update(control, dt);
@@ -761,11 +777,11 @@ function updateHud(now: number) {
     el("countdown").hidden = world.status !== "countdown";
     text(
       "countdown-number",
-      control.valid
+      control.valid || control.trackingGrace
         ? String(Math.max(1, Math.ceil(world.countdownMs / 1000)))
         : "◎",
     );
-    el("battle-message").hidden = control.valid;
+    el("battle-message").hidden = control.valid || !!control.trackingGrace;
     text("battle-message", "Пауза · верни руку целиком в кадр");
     text(
       "spell-name",
@@ -811,6 +827,7 @@ function updateHud(now: number) {
   } else hint(control.quality ?? world.hint, now);
 }
 function updateInputGuide() {
+  if (control.trackingGrace) return;
   const primary = !control.valid
     ? "не видна"
     : control.pinching
@@ -884,6 +901,12 @@ function frame(now: number) {
     const updateUi = now - lastHud >= 50;
     if (updateUi) lastHud = now;
     if (model) {
+      const expired = continuity.expire(control, now);
+      if (expired !== control) {
+        control = expired;
+        handOverlay.reset();
+        text("tracking-status", "✧ ПОКАЖИ РУКУ В КАДРЕ");
+      }
       if (now - lastInference > 500 && control.valid) {
         // Expire stale controls, but let an already running newer detection
         // arrive. Only explicit mode changes should invalidate its epoch.
@@ -907,7 +930,12 @@ function frame(now: number) {
             ? emptyControl()
             : control,
         );
-        control = { ...control, released: false, slash: null };
+        control = {
+          ...control,
+          released: false,
+          slash: null,
+          trackingInterrupted: false,
+        };
         const events = world.drainEvents();
         scene.emit(events);
         events.forEach((event) => {

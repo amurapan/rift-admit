@@ -232,6 +232,9 @@ export class Arena {
       deltaMs <= 0
     )
       return;
+    // Freeze simulation during a short detector gap without flashing a pause or
+    // destroying a spell. No charge, damage, release or ritual time can advance.
+    if (input.trackingGrace && !input.valid) return;
     this.paused = !input.valid;
     if (!input.valid) {
       this.shieldActive = false;
@@ -239,6 +242,7 @@ export class Arena {
       this.magic.pause(deltaMs);
       return;
     }
+    if (input.trackingInterrupted) this.magic.pause();
     let dt = deltaMs;
     if (this.status === "countdown") {
       const used = Math.min(this.countdownMs, dt);

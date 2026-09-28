@@ -18,6 +18,9 @@ export type Slash = { from: Point; to: Point; id?: number };
 export const DOMAIN_NEAR_DISTANCE = 0.52;
 export type Control = {
   valid: boolean;
+  // Missing measurements may briefly preserve presentation, never gesture time.
+  trackingGrace?: boolean;
+  trackingInterrupted?: boolean;
   open: boolean;
   fist: boolean;
   bladeSign: boolean;

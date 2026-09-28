@@ -35,6 +35,9 @@ describe("hand geometry", () => {
     );
   });
   it("identifies clipped and distant hands and rejects malformed input", () => {
+    const nearEdge = openPoints();
+    nearEdge[8].y = 0.01;
+    expect(describeHand(nearEdge)?.quality).toBeNull();
     const clipped = openPoints();
     clipped[8].x = 0.001;
     expect(describeHand(clipped)?.quality).toContain("целиком");

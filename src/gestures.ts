@@ -47,7 +47,7 @@ export function describeHand(points: Point[], aspect = 4 / 3): Hand | null {
   const thumbOpen = distance(p[4], p[5]) / Math.max(scale, 0.001) > 0.42;
   const clipped = points.some(
     (point) =>
-      point.x < 0.015 || point.x > 0.985 || point.y < 0.015 || point.y > 0.985,
+      point.x < 0.003 || point.x > 0.997 || point.y < 0.003 || point.y > 0.997,
   );
   return {
     palm: {

@@ -16,9 +16,16 @@ it("follows the same casting hand even when detector order changes", () => {
 });
 it("losing the casting hand never substitutes the other open palm for a release", () => {
   const t = new CastingHand();
-  t.choose([hand(0.3), hand(0.7)], ["Left", "Right"]);
-  expect(t.choose([hand(0.7)], ["Right"])).toBe(-1);
-  expect(t.choose([hand(0.7)], ["Right"])).toBe(0);
+  t.choose([hand(0.3), hand(0.7)], ["Left", "Right"], 100);
+  expect(t.choose([hand(0.7)], ["Right"], 150)).toBe(-1);
+  expect(t.choose([hand(0.7)], ["Right"], 250)).toBe(-1);
+  expect(t.choose([hand(0.7)], ["Right"], 450)).toBe(0);
+});
+it("remembers casting-hand identity across an empty detection", () => {
+  const t = new CastingHand();
+  t.choose([hand(0.3)], ["Left"], 100);
+  expect(t.choose([], [], 150)).toBe(-1);
+  expect(t.choose([hand(0.7), hand(0.3)], ["Right", "Left"], 250)).toBe(1);
 });
 
 import { CursorFollower } from "./tracking";
