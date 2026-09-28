@@ -23,6 +23,8 @@ export class HandDetector {
   private epoch = 0;
   private video: HTMLVideoElement | null = null;
   private callback = 0;
+  private captureWatchdog: ReturnType<typeof setInterval> | undefined;
+  private lastVideoCallback = 0;
   private cameraFrame = -1;
   private numHands = 2;
   private usesVideoCallback = false;
@@ -113,10 +115,14 @@ export class HandDetector {
   }
   start(video: HTMLVideoElement) {
     this.video = video;
+    this.cameraFrame = video.currentTime;
+    this.lastVideoCallback = performance.now();
+    this.submit(video, performance.now(), this.cameraFrame);
     this.usesVideoCallback =
       typeof video.requestVideoFrameCallback === "function";
     const tick = (_now: number, metadata?: VideoFrameCallbackMetadata) => {
       if (this.closed) return;
+      this.lastVideoCallback = performance.now();
       this.cameraFrame = metadata?.mediaTime ?? video.currentTime;
       if (!document.hidden)
         this.submit(video, performance.now(), this.cameraFrame);
@@ -127,6 +133,15 @@ export class HandDetector {
     this.callback = this.usesVideoCallback
       ? video.requestVideoFrameCallback(tick)
       : requestAnimationFrame(tick);
+    // Video callbacks depend on presentation and can stop for an occluded
+    // preview. Keep sampling decoded frames without accumulating a queue.
+    this.captureWatchdog = setInterval(() => {
+      if (this.closed || document.hidden) return;
+      const now = performance.now();
+      if (now - this.lastVideoCallback < 200) return;
+      this.cameraFrame = video.currentTime;
+      this.submit(video, now, this.cameraFrame);
+    }, 100);
   }
   setHands(count: 1 | 2) {
     this.numHands = count;
@@ -186,6 +201,7 @@ export class HandDetector {
   close() {
     this.closed = true;
     clearTimeout(this.timer);
+    clearInterval(this.captureWatchdog);
     if (this.video) {
       if (this.usesVideoCallback)
         this.video.cancelVideoFrameCallback(this.callback);

@@ -430,3 +430,33 @@ test("slow inference stays in the worker while the interface keeps drawing", asy
     stopped,
   );
 });
+
+test("camera tracking recovers when video presentation callbacks never arrive", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    HTMLVideoElement.prototype.requestVideoFrameCallback = () => 1;
+    HTMLVideoElement.prototype.cancelVideoFrameCallback = () => {};
+  });
+  await setup(page);
+  await gesture(page, "open");
+  await expect(page.locator("#tracking-status")).toContainText(
+    "РУКА РАСПОЗНАНА",
+  );
+  await page.locator("#help").click();
+  const before = await page.evaluate(() => (window as any).__detectorFrames);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__detectorFrames))
+    .toBeGreaterThan(before + 2);
+  await page.locator("#help").click();
+  await expect(page.locator("#primary-hand-state")).toHaveAttribute(
+    "data-seen",
+    "true",
+  );
+  await page.locator("#stop").click();
+  const stopped = await page.evaluate(() => (window as any).__detectorFrames);
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => (window as any).__detectorFrames)).toBe(
+    stopped,
+  );
+});

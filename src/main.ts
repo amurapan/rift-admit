@@ -156,8 +156,8 @@ function spellbook(active = -1) {
       : "";
   });
 }
-function clearMotion() {
-  model?.invalidate();
+function clearMotion(invalidateDetection = true) {
+  if (invalidateDetection) model?.invalidate();
   cursors.reset();
   handOverlay.reset();
   motion.reset();
@@ -885,7 +885,9 @@ function frame(now: number) {
     if (updateUi) lastHud = now;
     if (model) {
       if (now - lastInference > 500 && control.valid) {
-        clearMotion();
+        // Expire stale controls, but let an already running newer detection
+        // arrive. Only explicit mode changes should invalidate its epoch.
+        clearMotion(false);
         hand = null;
       }
       model.setHands(

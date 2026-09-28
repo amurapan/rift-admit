@@ -121,3 +121,46 @@ it("starts the newest camera frame immediately after a result, without waiting f
   detector.close();
   expect(camera.cancelVideoFrameCallback).toHaveBeenCalledOnce();
 });
+
+it("keeps detecting decoded video when presentation callbacks stop, and suspends while hidden", async () => {
+  setup();
+  vi.useFakeTimers({
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "setInterval",
+      "clearInterval",
+      "performance",
+    ],
+  });
+  try {
+    const camera = {
+      ...video,
+      requestVideoFrameCallback: vi.fn(() => 1),
+      cancelVideoFrameCallback: vi.fn(),
+    } as unknown as HTMLVideoElement;
+    const result = vi.fn();
+    const detector = await HandDetector.create(result, vi.fn());
+    detector.start(camera);
+    await Promise.resolve();
+    const worker = FakeWorker.latest;
+    expect(worker.messages.filter((m) => m.type === "frame")).toHaveLength(1);
+    worker.reply({ ...worker.messages[1], type: "result" });
+    camera.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(worker.messages.filter((m) => m.type === "frame")).toHaveLength(2);
+    worker.reply({ ...worker.messages[2], type: "result" });
+    expect(result).toHaveBeenCalledTimes(2);
+    Object.assign(document, { hidden: true });
+    camera.currentTime = 3;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(worker.messages.filter((m) => m.type === "frame")).toHaveLength(2);
+    Object.assign(document, { hidden: false });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(worker.messages.filter((m) => m.type === "frame")).toHaveLength(3);
+    detector.close();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
