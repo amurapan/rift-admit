@@ -8,6 +8,13 @@ await cp(
   new URL("wasm/", root),
   { recursive: true },
 );
+await cp(
+  new URL(
+    "../node_modules/@mediapipe/tasks-vision/vision_bundle.js",
+    import.meta.url,
+  ),
+  new URL("vision_bundle.js", root),
+);
 const model = new URL("hand_landmarker.task", root);
 try {
   await access(model);

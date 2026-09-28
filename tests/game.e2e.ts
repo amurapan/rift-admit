@@ -2,9 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 // Only the landmark detector is replaced; gesture geometry, ritual state, physics
 // and all UI transitions run in production modules, with a read-only observer.
 const fakeModel = `
-export const FilesetResolver={forVisionTasks:async()=>({})};
-export const HandLandmarker={createFromOptions:async()=>({close(){},detectForVideo(_v,now){
- const s=window.__testHand??{gesture:'none',point:{x:.5,y:.5},since:0};
+self.addEventListener('message',({data})=>{if(data.type==='test-hand')self.__testHand={...data.hand,since:performance.now()};});
+var Vision={FilesetResolver:{forVisionTasks:async()=>({})},
+HandLandmarker:{createFromOptions:async()=>({close(){},detectForVideo(_v,now){
+ now=performance.now();
+ const s=self.__testHand??{gesture:'none',point:{x:.5,y:.5},since:0};
  function hand(pose,point){
   if(pose==='none')return null;
   let p=[{x:.5,y:.8},{x:.4,y:.68},{x:.32,y:.6},{x:.26,y:.52},{x:.2,y:.43}];
@@ -19,7 +21,7 @@ export const HandLandmarker={createFromOptions:async()=>({close(){},detectForVid
  if(s.to){const f=Math.min(1,(now-s.since)/300);point={x:s.point.x+(s.to.x-s.point.x)*f,y:s.point.y+(s.to.y-s.point.y)*f};}
  if(s.circle){const a=Math.min(1,(now-s.since)/2700)*Math.PI*2*s.circle;point={x:.5+Math.cos(a)*.23,y:.52+Math.sin(a)*.23/.7};}
  return {landmarks:[hand(s.gesture,point),s.second?hand(s.second.gesture,s.second.point):null].filter(Boolean)};
-}})};`;
+}})}};`;
 async function gesture(
   page: Page,
   gesture: string,
@@ -28,7 +30,10 @@ async function gesture(
 ) {
   await page.evaluate(
     (data) => {
-      (window as any).__testHand = { ...data, since: performance.now() };
+      (window as any).__testWorker?.postMessage({
+        type: "test-hand",
+        hand: data,
+      });
     },
     { gesture, point, ...extra },
   );
@@ -59,9 +64,31 @@ async function contained(page: Page, selector: string) {
   expect(rect!.x + rect!.width).toBeLessThanOrEqual(viewport.width + 1);
   expect(rect!.y + rect!.height).toBeLessThanOrEqual(viewport.height + 1);
 }
-async function setup(page: Page) {
-  await page.route("**/@mediapipe_tasks-vision.js*", (route) =>
-    route.fulfill({ contentType: "application/javascript", body: fakeModel }),
+async function observeDetector(page: Page) {
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    (window as any).__detectorFrames = 0;
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        (window as any).__testWorker = this;
+        this.addEventListener("message", ({ data }) => {
+          if (data.type === "result") (window as any).__detectorFrames++;
+        });
+      }
+    };
+  });
+}
+async function setup(page: Page, inferenceDelay = 0) {
+  await observeDetector(page);
+  await page.route("**/mediapipe/vision_bundle.js", (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: fakeModel.replace(
+        "now=performance.now();",
+        `now=performance.now(); const until=now+${inferenceDelay}; while(performance.now()<until){}`,
+      ),
+    }),
   );
   await observer(page);
   await page.goto("/");
@@ -235,9 +262,15 @@ test("real model loads, camera shuts down, permission refusal can be retried", a
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await observeDetector(page);
   await page.goto("/");
   await page.locator("#start").click();
   await expect(page.locator("#awakening")).toBeVisible({ timeout: 60000 });
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__detectorFrames), {
+      timeout: 60000,
+    })
+    .toBeGreaterThan(0);
   await page.locator("#stop").click();
   expect(
     await page
@@ -311,12 +344,19 @@ test("territory guide shows both hands, survives tracking loss and teaches the c
   await palms(page, true);
   await expect(page.locator("#hint")).toContainText("до зелёной связи");
   await page.waitForTimeout(800);
-  expect(await page.evaluate(() => (window as any).__snapshot.stage)).toBe("idle");
+  expect(await page.evaluate(() => (window as any).__snapshot.stage)).toBe(
+    "idle",
+  );
   await page.screenshot({ path: "test-results/palms-distance-guide.png" });
   // A comfortable visible gap used to fail the raw-camera distance threshold.
-  await gesture(page, "open", { x: 0.27, y: 0.5 }, {
-    second: { gesture: "open", point: { x: 0.73, y: 0.5 } },
-  });
+  await gesture(
+    page,
+    "open",
+    { x: 0.27, y: 0.5 },
+    {
+      second: { gesture: "open", point: { x: 0.73, y: 0.5 } },
+    },
+  );
   await expect(page.locator("#hint")).toContainText("Достаточно близко");
   await page.screenshot({ path: "test-results/palms-accepted.png" });
   await expect(page.locator("#second-hand-state")).toContainText(
@@ -351,4 +391,38 @@ test("territory guide shows both hands, survives tracking loss and teaches the c
     .poll(() => page.evaluate(() => (window as any).__snapshot.stats.domains))
     .toBe(1);
   await expect(page.locator("#result")).toBeVisible();
+});
+
+test("slow inference stays in the worker while the interface keeps drawing", async ({
+  page,
+}) => {
+  await setup(page, 200);
+  await gesture(page, "open");
+  const sample = await page.evaluate(
+    () =>
+      new Promise<{ frames: number; detections: number }>((resolve) => {
+        const start = performance.now(),
+          detections = (window as any).__detectorFrames;
+        let frames = 0;
+        const tick = (now: number) => {
+          frames++;
+          if (now - start < 1400) requestAnimationFrame(tick);
+          else
+            resolve({
+              frames,
+              detections: (window as any).__detectorFrames - detections,
+            });
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  expect(sample.detections).toBeGreaterThanOrEqual(2);
+  // A synchronous 200 ms detector would allow at most seven frames here.
+  expect(sample.frames).toBeGreaterThan(14);
+  await page.locator("#stop").click();
+  const stopped = await page.evaluate(() => (window as any).__detectorFrames);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as any).__detectorFrames)).toBe(
+    stopped,
+  );
 });

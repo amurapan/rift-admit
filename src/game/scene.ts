@@ -19,10 +19,26 @@ export class Scene {
   private particles: Particle[] = [];
   private effects: Effect[] = [];
   private previous = 0;
+  private size = { width: 0, height: 0 };
+  private glows = new Map<string, HTMLCanvasElement>();
+  private backdrops = new Map<boolean, HTMLCanvasElement>();
+  private vignette: HTMLCanvasElement | null = null;
+  private quality = 1;
+  private frameTotal = 0;
+  private frameCount = 0;
+  private qualityCheck = 0;
   private trail: Point[] = [];
   private reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
   constructor(private canvas: HTMLCanvasElement) {
-    this.c = canvas.getContext("2d")!;
+    this.c = canvas.getContext("2d", { alpha: false })!;
+    new ResizeObserver(([entry]) => {
+      this.size = {
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      };
+      this.backdrops.clear();
+      this.vignette = null;
+    }).observe(canvas);
   }
   emit(events: FX[]) {
     for (const e of events) {
@@ -64,14 +80,63 @@ export class Scene {
     this.effects = this.effects.slice(-40);
     this.particles = this.particles.slice(-480);
   }
-  private halo(x: number, y: number, r: number, color: string) {
+  private halo(x: number, y: number, r: number, color: string, c = this.c) {
     if (r <= 0) return;
-    const c = this.c,
-      g = c.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, color);
-    g.addColorStop(1, "#00000000");
-    c.fillStyle = g;
-    c.fillRect(x - r, y - r, r * 2, r * 2);
+    let glow = this.glows.get(color);
+    if (!glow) {
+      glow = document.createElement("canvas");
+      glow.width = glow.height = 256;
+      const g = glow.getContext("2d")!;
+      const gradient = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, "#00000000");
+      g.fillStyle = gradient;
+      g.fillRect(0, 0, 256, 256);
+      this.glows.set(color, glow);
+    }
+    c.drawImage(glow, x - r, y - r, r * 2, r * 2);
+  }
+  private backdrop(w: number, h: number, domain: boolean) {
+    let layer = this.backdrops.get(domain);
+    if (!layer) {
+      layer = document.createElement("canvas");
+      const scale = Math.min(1, Math.sqrt(1_500_000 / (w * h)));
+      layer.width = Math.ceil(w * scale);
+      layer.height = Math.ceil(h * scale);
+      const c = layer.getContext("2d")!;
+      c.scale(scale, scale);
+      this.halo(
+        w * 0.5,
+        h * 0.35,
+        w * 0.65,
+        domain ? "#46587a80" : "#3e1d6850",
+        c,
+      );
+      // Broken cathedral, perspective floor and suspended masonry provide scale.
+      const horizon = h * 0.43;
+      const floor = c.createLinearGradient(0, horizon, 0, h);
+      floor.addColorStop(0, "#40365310");
+      floor.addColorStop(1, domain ? "#776c8c28" : "#211a352e");
+      c.fillStyle = floor;
+      c.fillRect(0, horizon, w, h);
+      c.strokeStyle = domain ? "#d9d7eb22" : "#baa0e914";
+      c.lineWidth = 0.7;
+      for (let i = -9; i <= 9; i++) {
+        c.beginPath();
+        c.moveTo(w * 0.5 + i * 9, horizon);
+        c.lineTo(w * 0.5 + (i * w) / 8, h);
+        c.stroke();
+      }
+      for (let i = 0; i < 11; i++) {
+        const y = horizon + Math.pow(i / 10, 2) * (h - horizon);
+        c.beginPath();
+        c.moveTo(0, y);
+        c.lineTo(w, y);
+        c.stroke();
+      }
+      this.backdrops.set(domain, layer);
+    }
+    this.c.drawImage(layer, 0, 0, w, h);
   }
   private seal(
     x: number,
@@ -121,11 +186,27 @@ export class Scene {
   }
   draw(world: Arena | null, input: Control, now: number) {
     const c = this.c,
-      rect = this.canvas.getBoundingClientRect(),
-      ratio = Math.min(devicePixelRatio || 1, 2),
+      rect = this.size,
+      ratio =
+        Math.min(
+          devicePixelRatio || 1,
+          1.5,
+          Math.sqrt(1_500_000 / Math.max(1, rect.width * rect.height)),
+        ) * this.quality,
       w = rect.width,
       h = rect.height;
     if (!w || !h) return;
+    const frameMs = now - this.previous;
+    if (this.previous && frameMs > 0 && frameMs < 250) {
+      this.frameTotal += frameMs;
+      this.frameCount++;
+    }
+    if (now - this.qualityCheck > 2000) {
+      if (this.frameCount > 20 && this.frameTotal / this.frameCount > 24)
+        this.quality = Math.max(0.65, this.quality * 0.85);
+      this.qualityCheck = now;
+      this.frameTotal = this.frameCount = 0;
+    }
     if (
       this.canvas.width !== Math.round(w * ratio) ||
       this.canvas.height !== Math.round(h * ratio)
@@ -170,29 +251,7 @@ export class Scene {
         Math.sin(now * 0.07) * (1 - impact.age / 0.35) * 4,
         Math.cos(now * 0.1) * (1 - impact.age / 0.35) * 3,
       );
-    this.halo(w * 0.5, h * 0.35, w * 0.65, domain ? "#46587a80" : "#3e1d6850");
-    // Broken cathedral, perspective floor and suspended masonry provide scale.
-    const horizon = h * 0.43;
-    const floor = c.createLinearGradient(0, horizon, 0, h);
-    floor.addColorStop(0, "#40365310");
-    floor.addColorStop(1, domain ? "#776c8c28" : "#211a352e");
-    c.fillStyle = floor;
-    c.fillRect(0, horizon, w, h);
-    c.strokeStyle = domain ? "#d9d7eb22" : "#baa0e914";
-    c.lineWidth = 0.7;
-    for (let i = -9; i <= 9; i++) {
-      c.beginPath();
-      c.moveTo(w * 0.5 + i * 9, horizon);
-      c.lineTo(w * 0.5 + (i * w) / 8, h);
-      c.stroke();
-    }
-    for (let i = 0; i < 11; i++) {
-      const y = horizon + Math.pow(i / 10, 2) * (h - horizon);
-      c.beginPath();
-      c.moveTo(0, y);
-      c.lineTo(w, y);
-      c.stroke();
-    }
+    this.backdrop(w, h, domain);
     if (domain) {
       // The floor separates into suspended slabs; an impossible horizon replaces it.
       for (let i = 0; i < 15; i++) {
@@ -771,18 +830,28 @@ export class Scene {
       }
     }
     c.restore();
-    const vignette = c.createRadialGradient(
-      w * 0.5,
-      h * 0.45,
-      Math.min(w, h) * 0.22,
-      w * 0.5,
-      h * 0.5,
-      Math.max(w, h) * 0.7,
-    );
-    vignette.addColorStop(0, "#00000000");
-    vignette.addColorStop(1, "#02030bcc");
-    c.fillStyle = vignette;
-    c.fillRect(0, 0, w, h);
+    if (!this.vignette) {
+      const layer = document.createElement("canvas");
+      const scale = Math.min(1, Math.sqrt(1_500_000 / (w * h)));
+      layer.width = Math.ceil(w * scale);
+      layer.height = Math.ceil(h * scale);
+      const v = layer.getContext("2d")!;
+      v.scale(scale, scale);
+      const gradient = v.createRadialGradient(
+        w * 0.5,
+        h * 0.45,
+        Math.min(w, h) * 0.22,
+        w * 0.5,
+        h * 0.5,
+        Math.max(w, h) * 0.7,
+      );
+      gradient.addColorStop(0, "#00000000");
+      gradient.addColorStop(1, "#02030bcc");
+      v.fillStyle = gradient;
+      v.fillRect(0, 0, w, h);
+      this.vignette = layer;
+    }
+    c.drawImage(this.vignette, 0, 0, w, h);
     // Both tracked hands stay visible. Numbers refer to roles, not mirrored left/right.
     if (
       input.valid &&
@@ -792,12 +861,14 @@ export class Scene {
       if (
         world &&
         !world.practiceDone &&
-        (world.practice === "domain" || (!world.practice && world.energy >= 100)) &&
+        (world.practice === "domain" ||
+          (!world.practice && world.energy >= 100)) &&
         !world.domainMs &&
         world.magic.stage === "idle" &&
         input.secondPosition
       ) {
-        const a = to(input.position), b = to(input.secondPosition);
+        const a = to(input.position),
+          b = to(input.secondPosition);
         const gap = distance(input.position, input.secondPosition);
         const near = gap <= DOMAIN_NEAR_DISTANCE;
         const bothOpen = input.open && input.secondOpen;
@@ -820,17 +891,26 @@ export class Scene {
         c.textAlign = "center";
         c.textBaseline = "middle";
         c.fillText(
-          !bothOpen ? "РАСКРОЙ ОБЕ ЛАДОНИ"
-            : near ? "ВЕРНО · УДЕРЖИ ЛАДОНИ"
+          !bothOpen
+            ? "РАСКРОЙ ОБЕ ЛАДОНИ"
+            : near
+              ? "ВЕРНО · УДЕРЖИ ЛАДОНИ"
               : `СБЛИЗЬ · ЕЩЁ ${Math.ceil((1 - DOMAIN_NEAR_DISTANCE / gap) * 100)}%`,
-          x, y,
+          x,
+          y,
         );
         c.fillStyle = "#ffffff22";
         c.fillRect(x - 92, y + 13, 184, 3);
         c.fillStyle = color;
-        c.fillRect(x - 92, y + 13, 184 * (near
-          ? clamp(world.magic.domainHold / 700)
-          : clamp(DOMAIN_NEAR_DISTANCE / gap)), 3);
+        c.fillRect(
+          x - 92,
+          y + 13,
+          184 *
+            (near
+              ? clamp(world.magic.domainHold / 700)
+              : clamp(DOMAIN_NEAR_DISTANCE / gap)),
+          3,
+        );
         c.restore();
       }
       const cursor = (

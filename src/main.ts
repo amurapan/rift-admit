@@ -1,5 +1,5 @@
-import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-import { describeHand, type Hand, type Lesson, type Point } from "./gestures";
+import { HandDetector, type Detection } from "./game/vision";
+import { describeHand, type Hand, type Lesson } from "./gestures";
 import { TutorialGate } from "./tutorial";
 import { readBest, saveBest } from "./battle";
 import { Arena, advice, type Advice } from "./game/arena";
@@ -11,7 +11,7 @@ import {
   type Calibration,
 } from "./game/control";
 import { Scene } from "./game/scene";
-import { CastingHand } from "./game/tracking";
+import { CastingHand, CursorFollower } from "./game/tracking";
 import { lessonArt } from "./game/lesson-art";
 import { Awakening } from "./game/ritual";
 import { Sound } from "./game/audio";
@@ -58,16 +58,18 @@ let trained = false;
 try {
   trained = localStorage.getItem("rift.ritual.trained") === "yes";
 } catch {}
-let model: HandLandmarker | null = null;
+let model: HandDetector | null = null;
+let detectorLoading: AbortController | null = null;
 let stream: MediaStream | null = null;
 let generation = 0;
-let lastVideo = -1,
-  lastInference = 0,
+let lastHud = 0;
+let lastInference = 0,
   lastFrame = performance.now();
 let world: Arena | null = null;
 let control = emptyControl();
 let hand: Hand | null = null;
 const castingHand = new CastingHand();
+const cursors = new CursorFollower();
 let calibrator = new Calibrator();
 let calibration: Calibration = { ...DEFAULT_CALIBRATION };
 let practiceList = [...lessons],
@@ -153,6 +155,8 @@ function spellbook(active = -1) {
   });
 }
 function clearMotion() {
+  model?.invalidate();
+  cursors.reset();
   motion.reset();
   control = emptyControl();
   castingHand.reset();
@@ -374,6 +378,8 @@ function showResult() {
 
 function shutdown(message = "Камера выключена. Можно начать снова.") {
   generation++;
+  detectorLoading?.abort();
+  detectorLoading = null;
   mode = "idle";
   world = null;
   clearMotion();
@@ -418,8 +424,9 @@ el("start").addEventListener("click", async () => {
     const acquired = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: "user",
-        width: { ideal: 640 },
-        height: { ideal: 480 },
+        width: { ideal: 640, max: 640 },
+        height: { ideal: 480, max: 480 },
+        frameRate: { ideal: 30, max: 30 },
       },
       audio: false,
     });
@@ -439,29 +446,16 @@ el("start").addEventListener("click", async () => {
       "setup-note",
       "Загружается распознавание. Кадры остаются на устройстве.",
     );
-    const files = await FilesetResolver.forVisionTasks(
-      `${import.meta.env.BASE_URL}mediapipe/wasm`,
-    );
-    const options = {
-      baseOptions: {
-        modelAssetPath: `${import.meta.env.BASE_URL}mediapipe/hand_landmarker.task`,
-        delegate: "GPU" as const,
+    detectorLoading = new AbortController();
+    const loaded = await HandDetector.create(
+      acceptDetection,
+      (error) => {
+        if (token !== generation) return;
+        console.error(error);
+        shutdown("Распознавание остановилось. Включи камеру снова.");
       },
-      runningMode: "VIDEO" as const,
-      numHands: 2,
-      minHandDetectionConfidence: 0.6,
-      minHandPresenceConfidence: 0.6,
-      minTrackingConfidence: 0.6,
-    };
-    let loaded: HandLandmarker;
-    try {
-      loaded = await HandLandmarker.createFromOptions(files, options);
-    } catch {
-      loaded = await HandLandmarker.createFromOptions(files, {
-        ...options,
-        baseOptions: { ...options.baseOptions, delegate: "CPU" },
-      });
-    }
+      detectorLoading.signal,
+    );
     if (token !== generation) {
       loaded.close();
       return;
@@ -469,7 +463,6 @@ el("start").addEventListener("click", async () => {
     model = loaded;
     stream!.getVideoTracks()[0].onended = () =>
       shutdown("Камера отключилась. Подключи её и начни снова.");
-    lastVideo = -1;
     lastInference = 0;
     el("recalibrate").hidden = false;
     document.body.classList.add("camera-on");
@@ -579,33 +572,13 @@ const connections = [
   [13, 17, 18, 19, 20],
   [0, 17],
 ];
-function infer(now: number): boolean {
-  if (
-    !model ||
-    video.readyState < 2 ||
-    now - lastInference < 40 ||
-    video.currentTime === lastVideo
-  )
-    return false;
+function acceptDetection(detected: Detection) {
+  if (document.hidden) return;
+  const now = detected.timestamp;
   const dt = Math.min(100, now - lastInference);
   lastInference = now;
-  lastVideo = video.currentTime;
-  let landmarks: Point[][];
-  let sides: (string | null)[] = [];
-  try {
-    const detected = model.detectForVideo(video, now);
-    landmarks = detected.landmarks;
-    sides = (detected.handedness ?? []).map((categories) =>
-      categories[0]?.score >= 0.7 ? categories[0].categoryName : null,
-    );
-  } catch (error) {
-    console.error(error);
-    shutdown("Распознавание остановилось. Включи камеру снова.");
-    return false;
-  }
-  const hands = landmarks.map((points) =>
-    describeHand(points, video.videoWidth / video.videoHeight),
-  );
+  const { landmarks, sides, width, height } = detected;
+  const hands = landmarks.map((points) => describeHand(points, width / height));
   const index = castingHand.choose(hands, sides);
   hand = index < 0 ? null : (hands[index] ?? null);
   control = motion.update(hand, hands[1 - index] ?? null, now, calibration);
@@ -874,7 +847,8 @@ function updateInputGuide() {
     .querySelectorAll("li")
     .forEach((item, i) => {
       item.hidden = i >= steps.length;
-      item.textContent = `${i < active ? "✓" : i + 1} ${steps[i] ?? ""}`;
+      const label = `${i < active ? "✓" : i + 1} ${steps[i] ?? ""}`;
+      if (item.textContent !== label) item.textContent = label;
       item.classList.toggle("active", i === active);
       item.classList.toggle("done", i < active);
       if (i === active) item.setAttribute("aria-current", "step");
@@ -889,12 +863,14 @@ function frame(now: number) {
   const dt = Math.max(0, now - lastFrame);
   lastFrame = now;
   if (!document.hidden) {
+    const updateUi = now - lastHud >= 50;
+    if (updateUi) lastHud = now;
     if (model) {
-      if (now - lastInference > 500) {
+      if (now - lastInference > 500 && control.valid) {
         clearMotion();
         hand = null;
       }
-      infer(now);
+      model.submit(video, now);
       if ((mode === "battle" || mode === "practice") && world) {
         world.tick(
           Math.min(dt, 100),
@@ -919,7 +895,7 @@ function frame(now: number) {
             cinematicUntil = now + 2700;
           }
         });
-        updateHud(now);
+        if (updateUi) updateHud(now);
         if (world.practiceDone && !practiceCompleteAt) {
           practiceCompleteAt = now + 1100;
           text("progress-label", "ОСВОЕНО");
@@ -954,8 +930,8 @@ function frame(now: number) {
             : 1,
       tear: awakening.complete ? 1 : awakening.spread,
     };
-    updateInputGuide();
-    scene.draw(world, control, now);
+    if (updateUi) updateInputGuide();
+    scene.draw(world, cursors.update(control, dt), now);
   }
   requestAnimationFrame(frame);
 }

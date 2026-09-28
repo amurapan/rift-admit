@@ -36,3 +36,34 @@ export class CastingHand {
     return index;
   }
 }
+
+/** Smooth only presentation between detector samples; spell recognition uses raw input. */
+export class CursorFollower {
+  private first: Point | null = null;
+  private second: Point | null = null;
+  reset() {
+    this.first = this.second = null;
+  }
+  update(
+    input: import("./control").Control,
+    dt: number,
+  ): import("./control").Control {
+    if (!input.valid) {
+      this.reset();
+      return input;
+    }
+    const alpha = 1 - Math.exp(-Math.max(0, dt) / 25);
+    const follow = (from: Point | null, to: Point): Point =>
+      from
+        ? {
+            x: from.x + (to.x - from.x) * alpha,
+            y: from.y + (to.y - from.y) * alpha,
+          }
+        : { ...to };
+    this.first = follow(this.first, input.position);
+    this.second = input.secondPosition
+      ? follow(this.second, input.secondPosition)
+      : null;
+    return { ...input, position: this.first, secondPosition: this.second };
+  }
+}
