@@ -1,4 +1,11 @@
-import { Arena, BOSS, CORE, type FX } from "./arena";
+import {
+  Arena,
+  BOSS,
+  CORE,
+  BEAM_CHARGE_MS,
+  BEAM_HOLD_MS,
+  type FX,
+} from "./arena";
 import { clamp, distance, DOMAIN_NEAR_DISTANCE, type Control } from "./control";
 import type { Point } from "../gestures";
 type Particle = Point & {
@@ -29,6 +36,104 @@ export class Scene {
   private qualityCheck = 0;
   private trail: Point[] = [];
   private reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  private drawBeam(
+    world: Arena,
+    to: (p: Point) => Point,
+    scale: number,
+    time: number,
+  ) {
+    const beam = world.beam;
+    if (!beam) return;
+    const c = this.c,
+      source = to(BOSS),
+      target = to(beam.target),
+      core = to(CORE);
+    const charging = beam.stage === "charging",
+      reflected = beam.stage === "reflected";
+    const color =
+      reflected || beam.hold >= BEAM_HOLD_MS ? "#9affdd" : "#ffb3cc";
+    const radius = scale * 0.115;
+    c.save();
+    c.globalAlpha = charging ? 1 : Math.min(1, beam.remaining / 500);
+    if (beam.stage === "dispelled") {
+      this.seal(target.x, target.y, radius * 1.4, time * 0.3, "#edd5aa");
+      c.restore();
+      return;
+    }
+    const points = reflected ? [target, source] : [source, target, core];
+    const path = () => {
+      c.beginPath();
+      c.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1],
+          b = points[i];
+        for (let j = 1; j <= 10; j++) {
+          const f = j / 10;
+          const ripple =
+            charging || this.reduced.matches || j === 10
+              ? 0
+              : Math.sin(j * 7 + time * 24) * 5;
+          c.lineTo(a.x + (b.x - a.x) * f + ripple, a.y + (b.y - a.y) * f);
+        }
+      }
+    };
+    c.strokeStyle = color;
+    c.lineJoin = "round";
+    if (charging) {
+      c.setLineDash([5, 9]);
+      c.lineWidth = 1.5;
+      path();
+      c.stroke();
+      c.setLineDash([]);
+      this.halo(
+        source.x,
+        source.y,
+        scale * (0.07 + 0.09 * (1 - beam.remaining / BEAM_CHARGE_MS)),
+        "#ff92be45",
+      );
+    } else {
+      for (const [width, alpha] of [
+        [22, 0.12],
+        [9, 0.5],
+        [2, 1],
+      ]) {
+        c.lineWidth = width;
+        c.globalAlpha = Math.min(1, beam.remaining / 500) * alpha;
+        path();
+        c.stroke();
+      }
+      c.globalAlpha = Math.min(1, beam.remaining / 500);
+    }
+    this.halo(
+      target.x,
+      target.y,
+      radius * 1.8,
+      reflected ? "#8effd93b" : "#ffa1c02b",
+    );
+    this.seal(target.x, target.y, radius, time * 0.2, color);
+    c.lineWidth = 4;
+    c.strokeStyle = "#9affdd";
+    c.beginPath();
+    c.arc(
+      target.x,
+      target.y,
+      radius + 7,
+      -Math.PI / 2,
+      -Math.PI / 2 + (TAU * beam.hold) / BEAM_HOLD_MS,
+    );
+    c.stroke();
+    if (charging) {
+      c.fillStyle = "#fff0f7";
+      c.font = "600 12px Manrope,sans-serif";
+      c.textAlign = "center";
+      c.fillText(
+        beam.hold >= BEAM_HOLD_MS ? "ДЕРЖИ ДО ВЫСТРЕЛА" : "ЛАДОНЬ СЮДА",
+        target.x,
+        target.y + radius + 26,
+      );
+    }
+    c.restore();
+  }
   constructor(private canvas: HTMLCanvasElement) {
     this.c = canvas.getContext("2d", { alpha: false })!;
     new ResizeObserver(([entry]) => {
@@ -451,6 +556,7 @@ export class Scene {
     }
     c.restore();
     if (world) {
+      if (!world.ended) this.drawBeam(world, to, fieldW, t);
       this.halo(core.x, core.y, fieldW * 0.11, "#73e4c52b");
       this.seal(core.x, core.y, fieldW * 0.05, t * 0.2, "#9ff4df");
       c.fillStyle = "#c8ffed";

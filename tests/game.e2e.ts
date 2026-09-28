@@ -48,7 +48,7 @@ async function observer(page: Page) {
       body:
         source +
         `\nconst original=Arena.prototype.tick;
-  Arena.prototype.tick=function(...args){const result=original.apply(this,args);window.__snapshot={status:this.status,practice:this.practice,done:this.practiceDone,score:this.score,elapsed:this.elapsed,stats:{...this.stats},stage:this.magic.stage,vortex:!!this.magic.vortex,blade:this.magic.bladeMs,entities:this.entities.map(e=>({...e}))};return result;};`,
+  Arena.prototype.tick=function(...args){const result=original.apply(this,args);window.__snapshot={status:this.status,practice:this.practice,done:this.practiceDone,score:this.score,elapsed:this.elapsed,beam:this.beam?{...this.beam}:null,stats:{...this.stats},stage:this.magic.stage,vortex:!!this.magic.vortex,blade:this.magic.bladeMs,entities:this.entities.map(e=>({...e}))};return result;};`,
     });
   });
 }
@@ -459,4 +459,37 @@ test("camera tracking recovers when video presentation callbacks never arrive", 
   expect(await page.evaluate(() => (window as any).__detectorFrames)).toBe(
     stopped,
   );
+});
+
+test("boss ray explains errors and a held palm returns the attack", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("rift.ritual.trained", "yes"),
+  );
+  await setup(page);
+  await page.locator("#skip-training").click();
+  await gesture(page, "pinch", { x: 0.15, y: 0.5 });
+  await expect(page.locator("#spell-name")).toHaveText("ПЕРЕХВАТ ЛУЧА", {
+    timeout: 16000,
+  });
+  await expect(page.locator("#hint")).toContainText("Раскрой все пальцы");
+  await gesture(page, "open", { x: 0.15, y: 0.5 });
+  await expect(page.locator("#hint")).toContainText("Перемести курсор");
+  await gesture(page, "open", { x: 0.5, y: 0.62 });
+  await expect(page.locator("#hint")).toContainText("держи ладонь");
+  await page.screenshot({ path: "test-results/beam-ready.png" });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__snapshot.stats.beamsReflected),
+    )
+    .toBe(1);
+  await expect(page.locator("#spell-name")).toHaveText("ОТРАЖЕНИЕ УДАЛОСЬ");
+  await page.screenshot({ path: "test-results/beam-return.png" });
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await contained(page, "#feedback");
+  await page.locator("#stop").click();
 });

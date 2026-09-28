@@ -73,6 +73,14 @@ export class Sound {
   effect(event: FX) {
     if (event.continuation) return;
     switch (event.type) {
+      case "warning":
+        this.tone(110, 2.7, "sine", 0.22, 440);
+        this.tone(220, 0.35, "triangle", 0.2, 330);
+        break;
+      case "beam":
+        this.tone(85, 0.7, "sine", 0.55, 35);
+        this.tone(760, 0.28, "sawtooth", 0.1, 100);
+        break;
       case "charge":
         this.tone(330, 0.22, "sine", 0.5, 880);
         break;

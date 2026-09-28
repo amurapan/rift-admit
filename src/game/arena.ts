@@ -4,6 +4,14 @@ import { Ritual } from "./ritual";
 export const CORE = { x: 0.5, y: 0.9 },
   BOSS = { x: 0.5, y: 0.2 },
   ROUND_MS = 150000;
+export const BEAM_CHARGE_MS = 2800,
+  BEAM_HOLD_MS = 450;
+export type Beam = {
+  target: Point;
+  stage: "charging" | "reflected" | "hit" | "dispelled";
+  remaining: number;
+  hold: number;
+};
 export type Entity = Point & {
   id: number;
   kind: "orb" | "crystal" | "armored";
@@ -18,6 +26,8 @@ export type Entity = Point & {
 export type FX = {
   type:
     | "charge"
+    | "warning"
+    | "beam"
     | "armed"
     | "seal"
     | "fail"
@@ -49,6 +59,8 @@ export type Stats = {
   domains: number;
   offTargetCuts: number;
   failedRituals: number;
+  beamsReflected: number;
+  beamsMissed: number;
 };
 export type Advice = { lesson: Lesson; title: string; detail: string };
 export const freshStats = (): Stats => ({
@@ -62,8 +74,16 @@ export const freshStats = (): Stats => ({
   domains: 0,
   offTargetCuts: 0,
   failedRituals: 0,
+  beamsReflected: 0,
+  beamsMissed: 0,
 });
 export function advice(s: Stats): Advice {
+  if (s.beamsMissed > s.beamsReflected)
+    return {
+      lesson: "shield",
+      title: "Перехвати луч",
+      detail: `Пропущено лучей: ${s.beamsMissed}. Раскрой ладонь, поставь курсор в отмеченное кольцо и удерживай до выстрела. Между атаками опускай щит для восстановления.`,
+    };
   if (s.failedRituals > 0)
     return {
       lesson: "domain",
@@ -121,6 +141,11 @@ export class Arena {
   shieldAge = 0;
   paused = true;
   magic = new Ritual();
+  beam: Beam | null = null;
+  private nextBeamAt = 7000;
+  private beamIndex = 0;
+  private staggerMs = 0;
+  beamHint = "";
   waves: {
     position: Point;
     radius: number;
@@ -154,6 +179,7 @@ export class Arena {
   get exposed() {
     return (
       this.domainMs > 0 ||
+      this.staggerMs > 0 ||
       (this.phase === 2 && (this.elapsed - 65000) % 9000 > 4200)
     );
   }
@@ -337,11 +363,17 @@ export class Arena {
     }
     if (this.combo && this.elapsed - this.lastHit > 6500) this.combo = 0;
     this.domainMs = Math.max(0, this.domainMs - ms);
+    this.staggerMs = Math.max(0, this.staggerMs - ms);
     for (const cut of this.cuts) cut.remaining -= ms;
     for (const cut of this.cuts.filter((c) => c.remaining <= 0))
       this.resolveCut(cut.slash);
     this.cuts = this.cuts.filter((c) => c.remaining > 0);
-    if (!this.practice && this.phase === 2) {
+    if (
+      !this.practice &&
+      this.phase === 2 &&
+      !this.staggerMs &&
+      this.beam?.stage !== "charging"
+    ) {
       const cycle = Math.floor((this.elapsed - 65000) / 9000);
       if ((this.elapsed - 65000) % 9000 >= 3000 && cycle > this.lastBossCycle) {
         this.lastBossCycle = cycle;
@@ -353,6 +385,14 @@ export class Arena {
       }
     }
     if (this.overheated && this.shieldEnergy >= 30) this.overheated = false;
+    // A deliberate defensive palm at the beam seal takes priority over an
+    // armed blade, so its five-second lifetime never makes this attack unfair.
+    if (
+      this.beam?.stage === "charging" &&
+      input.shield &&
+      distance(input.position, this.beam.target) <= 0.115
+    )
+      this.magic.bladeMs = 0;
     const shielding =
       input.shield &&
       !this.magic.domainHold &&
@@ -375,8 +415,10 @@ export class Arena {
         "Печать истощена. Опусти ладонь или сожми руку для восстановления.",
       );
     }
+    this.stepBeam(ms, input);
+    if (this.ended) return;
     this.spawnMs -= ms * (this.domainMs ? 0.3 : 1);
-    if (this.spawnMs <= 0) {
+    if (this.spawnMs <= 0 && this.beam?.stage !== "charging") {
       this.spawnWave();
       this.spawnMs = this.practice ? 800 : [2300, 1800, 1400][this.phase];
     }
@@ -504,6 +546,87 @@ export class Arena {
               ? "Глаз открыт — проведи разрез через него!"
               : "Подготовь сжатие или отрази залп. После атаки глаз откроется."
             : "Кулак → ладонь: волна. Два пальца → взмах: разрез. Ладонь: отражение.";
+  }
+  private stepBeam(ms: number, input: Control) {
+    if (this.practice) return;
+    if (
+      !this.beam &&
+      !this.domainMs &&
+      this.magic.stage === "idle" &&
+      !this.magic.domainHold &&
+      this.elapsed >= this.nextBeamAt
+    ) {
+      this.beam = {
+        target: { x: [0.5, 0.3, 0.7][this.beamIndex++ % 3], y: 0.62 },
+        stage: "charging",
+        remaining: BEAM_CHARGE_MS,
+        hold: 0,
+      };
+      this.effect("warning", BOSS);
+    }
+    const beam = this.beam;
+    if (!beam) return;
+    beam.remaining = Math.max(0, beam.remaining - ms);
+    if (beam.stage !== "charging") {
+      if (!beam.remaining) this.beam = null;
+      return;
+    }
+    if (this.domainMs) {
+      beam.stage = "dispelled";
+      beam.remaining = 1000;
+      this.nextBeamAt = this.elapsed + 16000;
+      this.beamHint = "Территория поглотила луч. Атакуй открытый глаз.";
+      return;
+    }
+    const near = distance(input.position, beam.target) <= 0.115;
+    const defending = this.shieldActive && near;
+    beam.hold = defending ? Math.min(BEAM_HOLD_MS, beam.hold + ms) : 0;
+    this.beamHint = this.overheated
+      ? "Щит истощён. Сожми руку для восстановления, затем раскрой ладонь в кольце."
+      : !input.open
+        ? "Раскрой все пальцы ладони — кулак и два пальца не отражают луч."
+        : this.magic.vortex ||
+            this.magic.bladeMs ||
+            this.magic.stage !== "idle" ||
+            this.magic.domainHold
+          ? "Заверши текущую магию или раскрой территорию, чтобы поглотить луч."
+          : !near
+            ? "Перемести курсор в светящееся кольцо на пути луча."
+            : beam.hold < BEAM_HOLD_MS
+              ? "Ладонь на месте. Останови кисть, чтобы закрепить печать."
+              : "Печать готова — держи ладонь в кольце до выстрела!";
+    if (beam.remaining > 0) return;
+    beam.remaining = 1000;
+    this.nextBeamAt = this.elapsed + 16000;
+    this.effect("beam", BOSS);
+    if (defending && beam.hold >= BEAM_HOLD_MS - 0.01) {
+      beam.stage = "reflected";
+      this.stats.beamsReflected++;
+      this.stats.parries++;
+      this.reward("shield", 250);
+      this.energy = Math.min(100, this.energy + 15);
+      this.effect("parry", beam.target, "ЛУЧ ВОЗВРАЩЁН", BOSS);
+      if (this.phase === 2) {
+        this.staggerMs = 5000;
+        this.bossDamage(32);
+      }
+      this.beamHint =
+        this.phase === 2
+          ? "Босс оглушён! Сложи два пальца и проведи разрез через глаз."
+          : "Луч возвращён! Энергия территории пополнена. Опусти щит для восстановления.";
+    } else {
+      beam.stage = "hit";
+      this.stats.beamsMissed++;
+      this.stats.damage++;
+      this.health = Math.max(0, this.health - 8);
+      this.combo = 0;
+      this.effect("hurt", CORE);
+      this.beamHint = defending
+        ? "Слишком поздно: поставь открытую ладонь в кольцо немного раньше и удерживай до выстрела."
+        : this.beamHint;
+      if (!this.health) this.finish(false);
+    }
+    this.coach(this.beamHint);
   }
   private resolveCut(slash: Slash) {
     let hits = 0;

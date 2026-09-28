@@ -2,7 +2,7 @@ import { HandDetector, type Detection } from "./game/vision";
 import { describeHand, type Hand, type Lesson } from "./gestures";
 import { TutorialGate } from "./tutorial";
 import { readBest, saveBest } from "./battle";
-import { Arena, advice, type Advice } from "./game/arena";
+import { Arena, advice, BEAM_HOLD_MS, type Advice } from "./game/arena";
 import {
   Calibrator,
   DEFAULT_CALIBRATION,
@@ -317,7 +317,7 @@ function startBattle() {
   text("spell-name", "СВОБОДНЫЙ БОЙ");
   spellbook();
   hint(
-    "Собирай врагов сжатием, отражай атаки и разрывай пространство.",
+    "Сохрани ядро до пробуждения босса, затем уничтожь его глаз. Луч отражай ладонью в отмеченном кольце.",
     performance.now(),
     true,
   );
@@ -372,7 +372,7 @@ function showResult() {
   text("duration-label", "ЛУЧШАЯ СЕРИЯ");
   text(
     "result-detail",
-    `Волны в цель: ${world.stats.burstHits}/${world.stats.bursts} · Отражения: ${world.stats.parries} · Разрезы: ${world.stats.cutHits}/${world.stats.cuts} · Территории: ${world.stats.domains}`,
+    `Волны в цель: ${world.stats.burstHits}/${world.stats.bursts} · Отражения: ${world.stats.parries} · Лучи: ${world.stats.beamsReflected}/${world.stats.beamsReflected + world.stats.beamsMissed} · Разрезы: ${world.stats.cutHits}/${world.stats.cuts} · Территории: ${world.stats.domains}`,
   );
   text("advice-title", recommendation.title);
   text("advice-detail", recommendation.detail);
@@ -760,11 +760,15 @@ function updateHud(now: number) {
     text("boss-name", world.phase === 2 ? "НАБЛЮДАТЕЛЬ" : "ЗАВЕСА");
     text(
       "boss-state",
-      world.phase === 2
-        ? world.exposed
-          ? "ГЛАЗ ОТКРЫТ — АТАКУЙ"
-          : "ГОТОВИТ ЗАЛП"
-        : "ЗАЩИЩАЙ ЯДРО",
+      world.beam?.stage === "charging"
+        ? `ЛУЧ ЧЕРЕЗ ${Math.ceil(world.beam.remaining / 1000)} С`
+        : world.beam?.stage === "reflected"
+          ? "ЛУЧ ВОЗВРАЩЁН"
+          : world.phase === 2
+            ? world.exposed
+              ? "ГЛАЗ ОТКРЫТ — АТАКУЙ"
+              : "ГОТОВИТ ЗАЛП"
+            : `ДО ПРОБУЖДЕНИЯ · ${Math.ceil(Math.max(0, 65000 - world.elapsed) / 1000)} С`,
     );
     el("boss-fill").style.width =
       `${world.phase === 2 ? (world.bossHp / 240) * 100 : 100 - (world.elapsed / 65000) * 100}%`;
@@ -803,6 +807,26 @@ function updateHud(now: number) {
     );
     el("progress-fill").style.width =
       `${world.magic.domainHold > 0 ? world.magic.domainHold / 7 : world.magic.progress ? world.magic.progress * 100 : world.shieldActive ? world.shieldEnergy : world.energy}%`;
+    if (world.beam) {
+      text(
+        "spell-name",
+        world.beam.stage === "charging"
+          ? "ПЕРЕХВАТ ЛУЧА"
+          : world.beam.stage === "reflected"
+            ? "ОТРАЖЕНИЕ УДАЛОСЬ"
+            : world.beam.stage === "dispelled"
+              ? "ЛУЧ ПОГЛОЩЁН"
+              : "ЛУЧ ПРОБИЛ ЗАЩИТУ",
+      );
+      text(
+        "progress-label",
+        world.beam.stage === "charging"
+          ? `ДО ВЫСТРЕЛА · ${(world.beam.remaining / 1000).toFixed(1)} С`
+          : "",
+      );
+      el("progress-fill").style.width =
+        `${(world.beam.hold / BEAM_HOLD_MS) * 100}%`;
+    }
   }
   if (mode === "practice" && !world.practiceDone) {
     const instruction = {
@@ -824,7 +848,8 @@ function updateHud(now: number) {
           (world.elapsed < world.hintUntil ? world.hint : instruction)),
       now,
     );
-  } else hint(control.quality ?? world.hint, now);
+  } else
+    hint(control.quality ?? (world.beam ? world.beamHint : world.hint), now);
 }
 function updateInputGuide() {
   if (control.trackingGrace) return;
