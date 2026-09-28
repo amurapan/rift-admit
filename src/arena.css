@@ -1,0 +1,631 @@
+.sound-toggle {
+  border: 1px solid #3c304c;
+  border-radius: 5px;
+  background: #19141f;
+  color: #c7b3dd;
+  padding: 10px 13px;
+  font:
+    600 9px Manrope,
+    sans-serif;
+  letter-spacing: 1px;
+}
+.sound-toggle[aria-pressed="false"] {
+  color: #8b8195;
+}
+.arena {
+  min-height: 780px;
+}
+.spell {
+  opacity: 0.78;
+}
+.spell.active {
+  opacity: 1;
+}
+.spell.done {
+  opacity: 1;
+}
+.secret-spell {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  padding: 20px 0;
+  border-top: 1px solid #33283e;
+}
+.secret-spell > span {
+  font:
+    38px Georgia,
+    serif;
+  color: #ddc1a1;
+}
+.secret-spell strong {
+  font-size: 11px;
+  font-weight: 500;
+  color: #ddc9ad;
+}
+.secret-spell p {
+  font-size: 9px;
+  line-height: 1.7;
+  color: #a08d9d;
+  margin: 7px 0 0;
+}
+.camera-card .text-button {
+  font-size: 9px;
+  margin: 8px 0 0;
+  padding-left: 0;
+}
+.progress-card {
+  margin-top: 18px;
+  padding: 19px;
+  border: 1px solid #2f2838;
+  background: #14111a;
+  border-radius: 9px;
+}
+.progress-card .eyebrow {
+  font-size: 8px;
+  letter-spacing: 1.5px;
+}
+.progress-card p {
+  font-size: 10px;
+  line-height: 1.8;
+  color: #a99ab7;
+  margin: 12px 0 0;
+}
+.combat-hud {
+  position: absolute;
+  top: 59px;
+  left: 6%;
+  right: 6%;
+  pointer-events: none;
+}
+.combat-hud .hud-stats {
+  gap: 12px;
+}
+.combat-hud .hud-stats > div {
+  text-align: left;
+}
+.combat-hud .hud-stats > div:last-child {
+  text-align: right;
+}
+.combat-hud .hud-stats strong {
+  font-size: 26px;
+}
+.boss-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  letter-spacing: 1px;
+  margin-top: 16px;
+  color: #b9a1c2;
+}
+.boss-track {
+  height: 3px;
+  background: #3f2940;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.boss-track > div {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #9981d5, #ef9bb2);
+  transition: width 0.2s;
+}
+.resource-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #897990;
+  margin-top: 11px;
+}
+.resource-row b {
+  color: #baacd5;
+  font-weight: 500;
+  margin-left: 7px;
+}
+.resource-row b.ready-energy {
+  color: #efd59c;
+  text-shadow: 0 0 12px #dab875;
+}
+.cinematic {
+  position: absolute;
+  inset: 34% 0 auto;
+  text-align: center;
+  padding: 30px 15px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, #160e24df, transparent);
+  z-index: 5;
+}
+.cinematic small {
+  display: block;
+  color: #ba9acf;
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  margin-bottom: 12px;
+}
+.cinematic strong {
+  font-size: clamp(21px, 3vw, 35px);
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: #e0c8ef;
+}
+.battle-message {
+  top: 155px;
+  z-index: 2;
+  background: #17111ae0;
+  padding: 9px;
+  border: 1px solid #514059;
+  border-radius: 5px;
+  width: max-content;
+  max-width: 90%;
+  margin: auto;
+  color: #d4bad9;
+}
+.calibration-panel {
+  position: absolute;
+  inset: 60px 10% 85px;
+  padding: 30px 25px;
+  background: #15101ef5;
+  border: 1px solid #664a7c;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  z-index: 3;
+}
+.calibration-panel h2 {
+  font-size: 29px;
+  font-weight: 500;
+  margin: 0 0 22px;
+  letter-spacing: -0.6px;
+}
+.calibration-map {
+  width: min(100%, 320px);
+  height: 200px;
+  border: 1px solid #463253;
+  border-radius: 8px;
+  background:
+    linear-gradient(#aa8ade0c 1px, transparent 1px),
+    linear-gradient(90deg, #aa8ade0c 1px, transparent 1px);
+  background-size: 25px 25px;
+  position: relative;
+  overflow: hidden;
+}
+.calibration-map > span {
+  position: absolute;
+  inset: 40% 0 auto;
+  pointer-events: none;
+  color: #967aa7;
+  letter-spacing: 24px;
+  font-size: 26px;
+}
+.calibration-map > i {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #e5bdfb;
+  background: #cda6f340;
+  border-radius: 100%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+#calibration-range {
+  position: absolute;
+  border: 1px dashed #d6acfa;
+  background: #be93e816;
+}
+.calibrated #calibration-range {
+  border-color: #a5e7c9;
+  background: #9cdcb91a;
+}
+.calibration-panel > p:not(.eyebrow) {
+  font-size: 12px;
+  line-height: 1.8;
+  max-width: 350px;
+  color: #c4b3cf;
+  margin: 20px 0 15px;
+  min-height: 44px;
+}
+.calibration-panel .progress-track {
+  width: 180px;
+}
+#calibration-progress {
+  height: 100%;
+  width: 0;
+  background: #aee5c7;
+}
+.calibration-panel > small {
+  font-size: 9px;
+  line-height: 1.6;
+  max-width: 290px;
+  color: #93809f;
+  margin-top: 16px;
+}
+.lesson-demo {
+  inset: 65px 8% 185px;
+}
+.lesson-demo h2 {
+  font-size: 24px;
+}
+.lesson-demo p {
+  font-size: 12px;
+}
+.lesson-demo svg {
+  height: 175px;
+}
+.feedback {
+  left: 6%;
+  right: 6%;
+  bottom: 62px;
+  padding: 17px 21px;
+}
+.feedback p {
+  min-height: 38px;
+}
+.feedback-label {
+  line-height: 1.6;
+  gap: 15px;
+}
+.report {
+  max-width: 390px;
+  margin: 0 0 20px;
+  padding: 15px;
+  background: #20172a;
+  border: 1px solid #493452;
+  border-radius: 7px;
+  text-align: left;
+}
+.report > p {
+  font-size: 10px;
+  line-height: 1.65;
+  color: #b9a4c7;
+  margin: 0 0 12px;
+}
+.report > strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e2ccee;
+  display: block;
+  margin-bottom: 7px;
+}
+.report .text-button {
+  padding: 0;
+  margin: 0;
+  color: #dbb9f6;
+  font-size: 10px;
+}
+.report p:last-of-type {
+  margin-bottom: 10px;
+}
+.result {
+  inset: 54px 24px 60px;
+  padding: 24px;
+}
+.result-mark {
+  font-size: 48px;
+  margin-bottom: 17px;
+}
+.result-stats {
+  padding: 20px 0;
+}
+.result > p:not(.eyebrow) {
+  max-width: 380px;
+  line-height: 1.7;
+}
+.result .text-button {
+  margin-top: 6px;
+}
+.result .report .text-button {
+  margin-top: 0;
+}
+.result > small {
+  max-width: 350px;
+}
+.arena-mode .camera-tip {
+  color: #a795b2;
+}
+.arena-mode .spell {
+  opacity: 0.85;
+}
+.arena:has(.start-panel:not([hidden])) #scene {
+  height: 100%;
+}
+.arena:has(.start-panel:not([hidden])) .portal-caption {
+  top: 65%;
+}
+@media (max-width: 1000px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 255px;
+  }
+  .secret-spell strong {
+    font-size: 10px;
+  }
+  .combat-hud .hud-stats strong {
+    font-size: 22px;
+  }
+  .lesson-demo h2 {
+    font-size: 21px;
+  }
+  .result {
+    inset: 50px 14px 60px;
+  }
+  .result-stats {
+    gap: 40px;
+  }
+}
+@media (max-width: 700px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .arena {
+    min-height: 700px;
+  }
+  .header {
+    gap: 10px;
+  }
+  .edition {
+    display: none;
+  }
+  .sound-toggle {
+    font-size: 8px;
+    padding: 9px 10px;
+  }
+  .intro {
+    padding-top: 26px;
+  }
+  .lead {
+    max-width: 330px;
+  }
+  .combat-hud {
+    top: 48px;
+    left: 18px;
+    right: 18px;
+  }
+  .combat-hud .hud-stats strong {
+    font-size: 20px;
+  }
+  .combat-hud .hud-stats small {
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+  .boss-label {
+    font-size: 6px;
+    margin-top: 12px;
+    letter-spacing: 0.6px;
+  }
+  .resource-row {
+    font-size: 6px;
+    letter-spacing: 0.5px;
+  }
+  .resource-row b {
+    margin-left: 3px;
+  }
+  .camera-on .camera-card,
+  .arena-mode .camera-card {
+    top: 163px;
+    right: 14px;
+    width: 68px;
+    opacity: 0.9;
+  }
+  .camera-on .camera-card .text-button {
+    display: none;
+  }
+  .camera-on:has(.lesson-demo:not([hidden])) .camera-card {
+    top: 490px;
+    width: 74px;
+  }
+  .battle-message {
+    top: 143px;
+    font-size: 8px;
+    text-align: center;
+    left: 14px;
+    right: 94px;
+    width: auto;
+    max-width: none;
+    padding: 7px;
+  }
+  .feedback {
+    left: 14px;
+    right: 14px;
+    bottom: 55px;
+    padding: 15px;
+  }
+  .feedback p {
+    font-size: 11px;
+    line-height: 1.7;
+    min-height: 40px;
+    margin: 11px 0;
+  }
+  .feedback-label {
+    font-size: 7px;
+    letter-spacing: 0.6px;
+  }
+  .calibration-panel {
+    inset: 48px 12px 68px;
+    padding: 20px 16px;
+  }
+  .calibration-panel h2 {
+    font-size: 24px;
+  }
+  .calibration-map {
+    height: 185px;
+    max-width: 260px;
+  }
+  .calibration-panel > p:not(.eyebrow) {
+    font-size: 11px;
+  }
+  .lesson-demo {
+    inset: 55px 12px 215px;
+    padding: 20px 16px;
+  }
+  .lesson-demo h2 {
+    font-size: 22px;
+    line-height: 1.4;
+  }
+  .lesson-demo svg {
+    height: 145px;
+  }
+  .lesson-demo p {
+    font-size: 11px;
+  }
+  .lesson-arm {
+    font-size: 10px;
+    margin-top: 18px;
+  }
+  .result {
+    inset: 45px 10px 50px;
+    padding: 16px 12px;
+  }
+  .result-mark {
+    font-size: 31px;
+    margin-bottom: 9px;
+  }
+  .result h2 {
+    font-size: 25px;
+  }
+  .result .eyebrow {
+    font-size: 7px;
+  }
+  .result > p:not(.eyebrow) {
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  .result-stats {
+    padding: 15px 0;
+  }
+  .result-stats strong {
+    font-size: 25px;
+  }
+  .report {
+    padding: 11px;
+    margin-bottom: 15px;
+  }
+  .report > p {
+    font-size: 9px;
+    line-height: 1.6;
+    margin-bottom: 9px;
+  }
+  .report > strong {
+    font-size: 11px;
+  }
+  .report .text-button {
+    font-size: 9px;
+  }
+  .result > small {
+    font-size: 8px;
+    max-width: 280px;
+  }
+  .cinematic {
+    top: 37%;
+    padding: 23px 12px;
+  }
+  .cinematic small {
+    font-size: 7px;
+    letter-spacing: 1.6px;
+  }
+  .cinematic strong {
+    font-size: 20px;
+    letter-spacing: 1px;
+  }
+  .secret-spell strong {
+    font-size: 12px;
+  }
+  .secret-spell p {
+    font-size: 10px;
+  }
+  .progress-card {
+    margin-top: 16px;
+  }
+}
+/* Keep the complete playing field visible while the camera is on. */
+.workspace {
+  align-items: start;
+}
+.arena {
+  height: 820px;
+  min-height: 700px;
+}
+.feedback {
+  backdrop-filter: none;
+  background: #191321f5;
+}
+.camera-on .intro {
+  display: none;
+}
+.camera-on .workspace {
+  padding-top: 18px;
+}
+.camera-on .arena {
+  height: calc(100svh - 135px);
+  max-height: 840px;
+  min-height: 560px;
+}
+.camera-on .result {
+  overflow-y: auto;
+}
+.camera-on .lesson-demo {
+  inset: 52px 8% 110px;
+}
+.camera-on .lesson-demo svg {
+  height: 130px;
+}
+.camera-on .lesson-demo h2 {
+  font-size: 22px;
+}
+.camera-on .calibration-panel {
+  inset: 50px 8% 65px;
+  padding: 22px;
+}
+.camera-on .calibration-map {
+  height: 160px;
+}
+.camera-on .calibration-panel > p:not(.eyebrow) {
+  font-size: 11px;
+  margin: 12px 0;
+}
+.camera-on .calibration-panel h2 {
+  margin-bottom: 15px;
+  font-size: 26px;
+}
+@media (max-width: 700px) {
+  .arena {
+    height: 700px;
+  }
+  .camera-on .workspace {
+    padding-top: 12px;
+  }
+  .camera-on .arena {
+    height: calc(100svh - 96px);
+    max-height: none;
+    min-height: 620px;
+  }
+  .camera-on .lesson-demo {
+    inset: 52px 12px 170px;
+  }
+  .camera-on .lesson-demo svg {
+    height: 145px;
+  }
+  .camera-on:has(.lesson-demo:not([hidden])) .camera-card {
+    top: auto;
+    bottom: auto;
+    transform: translateY(0);
+    top: calc(100svh - 235px);
+  }
+  .camera-on .calibration-panel {
+    inset: 48px 12px 65px;
+  }
+  .camera-on .calibration-map {
+    height: 180px;
+  }
+  .camera-on .calibration-panel > p:not(.eyebrow) {
+    font-size: 11px;
+    max-width: 260px;
+  }
+  .camera-on .result {
+    justify-content: center;
+  }
+  .camera-on .report {
+    flex-shrink: 0;
+  }
+}

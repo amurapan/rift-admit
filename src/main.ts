@@ -1,532 +1,772 @@
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
-import { describeHand, GestureLesson, type Hand, type Lesson, type Point, type Reading } from './gestures';
-import { ATTACK_MS, Battle, readBest, REQUIRED_SEALS, saveBest } from './battle';
-import { TutorialGate } from './tutorial';
-import './style.css';
-import './battle.css';
-import './tutorial.css';
+import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+import { describeHand, type Hand, type Lesson, type Point } from "./gestures";
+import { TutorialGate } from "./tutorial";
+import { readBest, saveBest } from "./battle";
+import { Arena, advice, type Advice } from "./game/arena";
+import {
+  Calibrator,
+  DEFAULT_CALIBRATION,
+  emptyControl,
+  MotionControl,
+  type Calibration,
+} from "./game/control";
+import { Scene } from "./game/scene";
+import { Sound } from "./game/audio";
+import { markup } from "./ui";
+import "./style.css";
+import "./battle.css";
+import "./tutorial.css";
+import "./arena.css";
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <header class="header"><a class="brand" href="./" aria-label="Разлом, главная"><span class="brand-mark">✳</span> РАЗЛОМ<span class="brand-en">RIFT</span></a><span class="edition">MOTION <span>/</span> ЗАКРОЙ РАЗЛОМ</span><span class="header-status"><i></i> МАГИЯ В ТВОИХ РУКАХ</span></header>
-  <main>
-    <section class="intro"><div><p class="eyebrow">КАМЕРА ВМЕСТО ДЖОЙСТИКА</p><h1>По ту сторону <em>обычного.</em></h1><p class="lead">Освой три заклинания. Удержи тьму. Закрой разлом за 60 секунд.</p></div><div class="chapter"><span id="best-score">0</span><small>ЛИЧНЫЙ РЕКОРД</small></div></section>
-    <div class="workspace">
-      <section class="arena" aria-label="Магическая арена">
-        <div class="arena-top"><span><i class="live-dot"></i><span id="arena-status">ОЖИДАНИЕ МАГА</span></span><span id="counter">00 / 03</span></div>
-        <canvas id="scene" aria-label="Разлом и положение руки"></canvas>
-        <div id="battle-hud" class="battle-hud" hidden><div class="hud-stats"><div><small>ВРЕМЯ</small><strong id="time-left">60</strong></div><div><small>ЗАЩИТА</small><strong id="health" aria-label="3 жизни">◆ ◆ ◆</strong></div><div><small>ОЧКИ</small><strong id="score">0</strong></div></div><div class="seal-label"><span>ПЕЧАТЬ РАЗЛОМА</span><span id="seal-count">0 / 9</span></div><div class="seal-track"><div id="seal-fill"></div></div></div>
-        <div id="countdown" class="countdown" hidden><span id="countdown-number">3</span><small>ПРИГОТОВЬ РУКУ</small></div>
-        <div id="battle-message" class="battle-message" role="status" aria-live="polite" hidden></div>
-        <div id="lesson-demo" class="lesson-demo" hidden><p class="eyebrow" id="lesson-number">ЗАКЛИНАНИЕ 01 / 03</p><h2 id="lesson-title"></h2><div id="lesson-animation"></div><p id="lesson-instruction"></p><div id="lesson-arm" class="lesson-arm" role="status"></div><div class="lesson-arm-track"><div id="lesson-arm-progress"></div></div></div>
-        <div id="swipe-guide" class="swipe-guide" hidden><div></div><span>→</span><small>НАЧНИ ЗДЕСЬ</small><small>ВЕДИ СЮДА</small></div>
-        <div class="portal-caption" id="portal-caption"><span>НЕСТАБИЛЬНЫЙ РАЗЛОМ</span><small>Для связи нужен проводник. Это ты.</small></div>
-        <div class="start-panel" id="start-panel"><button id="start" class="primary">Пробудить силу <span>↗</span></button><p id="setup-note" role="status">Разреши камеру · покажи одну руку · следуй подсказкам</p><small>Видео обрабатывается на устройстве и не отправляется на сервер.</small></div>
-        <div id="feedback" class="feedback" hidden><div class="feedback-label"><span id="spell-name">ЗАХВАТ ЭНЕРГИИ</span><span id="progress-label">0%</span></div><p id="hint" role="status" aria-live="polite"></p><div class="progress-track"><div id="progress-fill"></div></div><div id="attack-status" class="attack-status" hidden><span id="attack-label">ДО АТАКИ</span><strong id="attack-time">8,0 с</strong><div><div id="attack-fill"></div></div></div></div>
-        <div id="result" class="result" hidden><span class="result-mark" id="result-mark">✳</span><p class="eyebrow" id="result-eyebrow">ИНИЦИАЦИЯ ЗАВЕРШЕНА</p><h2 id="result-title">Теперь закрой разлом.</h2><p id="result-description">60 секунд · 3 жизни · 9 печатей</p><div class="result-stats"><div><strong id="result-value">3 / 3</strong><small id="result-value-label">ЗАКЛИНАНИЯ</small></div><div><strong id="duration">—</strong><small id="duration-label">ВРЕМЯ ОБУЧЕНИЯ</small></div></div><p id="result-detail" class="result-detail"></p><button id="restart" class="primary">Начать испытание <span>↗</span></button><button id="retrain" class="text-button">Повторить обучение</button><small id="restart-hint">Убери руку из кадра, затем покажи ладонь для старта.</small><div class="result-gesture-track" aria-hidden="true"><div id="restart-progress"></div></div></div>
-        <div class="arena-bottom"><span>✧ <span id="tracking-status">СВЯЗЬ НЕ УСТАНОВЛЕНА</span></span><button id="stop" hidden>Выключить камеру</button><span id="arena-note">ОДНА РУКА. ТРИ ЗАКЛИНАНИЯ.</span></div>
-      </section>
-      <aside>
-        <section class="spellbook"><div class="section-title"><h2>Твои заклинания</h2><span>03</span></div>
-          <div class="spell active" data-step="0"><div class="spell-icon">◈</div><div><span class="spell-number">01 / ПРИТЯЖЕНИЕ</span><h3>Захват энергии</h3><p>Соедини два пальца.<br> Перенеси искру в разлом.</p></div><span class="spell-check"></span></div>
-          <div class="spell" data-step="1"><div class="spell-icon">⬡</div><div><span class="spell-number">02 / ЗАЩИТА</span><h3>Невидимый щит</h3><p>Раскрой ладонь.<br> Удерживай её на месте.</p></div><span class="spell-check"></span></div>
-          <div class="spell" data-step="2"><div class="spell-icon">ϟ</div><div><span class="spell-number">03 / ИМПУЛЬС</span><h3>Рассекающий удар</h3><p>Взмахни открытой ладонью<br> горизонтально.</p></div><span class="spell-check"></span></div>
-        </section>
-        <section class="camera-card"><div class="section-title"><h2>Твой проводник</h2><span id="camera-badge">КАМЕРА ВЫКЛ.</span></div><div class="camera-view"><video id="camera" autoplay muted playsinline></video><canvas id="skeleton"></canvas><div id="camera-placeholder"><span>◎</span><p>Здесь появится твоя рука</p></div></div><p class="camera-tip">Расположись перед светом.<br>Оставь место для взмаха.</p></section>
-      </aside>
-    </div>
-    <footer><span>ADMIT HACKATHON <span class="muted">/</span> 2026</span><span>Не нужно быть магом. Достаточно начать.</span><span>РАЗЛОМ <span class="muted">—</span> ИНИЦИАЦИЯ</span></footer>
-  </main>`;
-
-function el<T extends HTMLElement>(id: string) { return document.getElementById(id) as T; }
-const video = el<HTMLVideoElement>('camera');
-const scene = el<HTMLCanvasElement>('scene');
-const ctx = scene.getContext('2d')!;
-const skeleton = el<HTMLCanvasElement>('skeleton');
-const sk = skeleton.getContext('2d')!;
-const start = el<HTMLButtonElement>('start');
-const lessons: Lesson[] = ['pinch', 'shield', 'swipe'];
-const names = ['ЗАХВАТ ЭНЕРГИИ', 'НЕВИДИМЫЙ ЩИТ', 'РАССЕКАЮЩИЙ УДАР'];
-const evaluator = new GestureLesson();
+document.querySelector<HTMLDivElement>("#app")!.innerHTML = markup;
+const el = <T extends HTMLElement = HTMLElement>(id: string) =>
+  document.getElementById(id) as T;
+const text = (id: string, value: string) => {
+  if (el(id).textContent !== value) el(id).textContent = value;
+};
+const video = el<HTMLVideoElement>("camera");
+const skeleton = el<HTMLCanvasElement>("skeleton");
+const sk = skeleton.getContext("2d")!;
+const scene = new Scene(el<HTMLCanvasElement>("scene"));
+const sound = new Sound();
+const motion = new MotionControl();
 const tutorial = new TutorialGate();
-let swipeArmed = false;
-let swipeStartMs = 0;
-let swipeStartX = 0.3;
-type Mode = 'training' | 'ready' | 'battle' | 'finished';
-let mode: Mode = 'training';
-let battle: Battle | null = null;
-let bestScore = 0;
-try { bestScore = readBest(localStorage); } catch { /* Some browsers deny access to the storage property itself. */ }
-el('best-score').textContent = bestScore.toLocaleString('ru-RU');
+const lessons: Lesson[] = ["pinch", "shield", "swipe"];
+const names = ["ТЕЛЕКИНЕЗ", "ОТРАЖЕНИЕ", "РАЗРЕЗ"];
+let mode:
+  | "idle"
+  | "loading"
+  | "calibration"
+  | "demo"
+  | "practice"
+  | "ready"
+  | "battle"
+  | "result" = "idle";
 let model: HandLandmarker | null = null;
 let stream: MediaStream | null = null;
-let running = false;
-let requestId = 0;
-let lastVideoTime = -1;
-let lastInference = 0;
-let step = 0;
-let nextStepAt = 0;
-let elapsed = 0;
-let lastFrame = performance.now();
+let generation = 0;
+let lastVideo = -1,
+  lastInference = 0,
+  lastFrame = performance.now();
+let world: Arena | null = null;
+let control = emptyControl();
 let hand: Hand | null = null;
-let points: Point[] = [];
-let reading: Reading = { hint: '', progress: 0, success: false, holding: false };
-let flashAt = -10000;
-let damageAt = -10000;
-let lastCast: Lesson = 'pinch';
-let trainingUnlocked = false;
-let restartArmed = false;
-let restartHold = 0;
-let hintCandidate = '';
-let hintSince = 0;
-
-function setHint(text: string, now: number, immediate = false) {
-  if (hintCandidate !== text) { hintCandidate = text; hintSince = now; }
-  if ((immediate || now - hintSince > 220) && el('hint').textContent !== text) el('hint').textContent = text;
+let previousPalm: Point | null = null;
+let calibrator = new Calibrator();
+let calibration: Calibration = { ...DEFAULT_CALIBRATION };
+let practiceList = [...lessons],
+  lessonIndex = 0,
+  practiceCompleteAt = 0;
+let resultArmed = false,
+  resultHold = 0,
+  resultGesture = "";
+let bestScore = 0;
+let runs: { score: number; won: boolean; hits: number; combo: number }[] = [];
+let recommendation: Advice | null = null;
+let cinematicUntil = 0;
+let pendingHint = "",
+  hintAt = 0;
+try {
+  bestScore = readBest(localStorage);
+  const saved = JSON.parse(localStorage.getItem("rift.runs.v2") ?? "[]");
+  if (Array.isArray(saved))
+    runs = saved
+      .filter(
+        (r) =>
+          Number.isFinite(r.score) &&
+          Number.isFinite(r.combo) &&
+          Number.isFinite(r.hits) &&
+          typeof r.won === "boolean",
+      )
+      .slice(-8);
+} catch {
+  /* Private browsing can disable storage. */
 }
-
-function updateSpellbook() {
-  const active = mode === 'battle' && battle ? lessons.indexOf(battle.expected) : step;
-  document.querySelectorAll<HTMLElement>('.spell').forEach((spell, i) => {
-    spell.classList.toggle('active', i === active);
-    spell.classList.toggle('done', mode !== 'battle' && i < step);
-    spell.querySelector('.spell-check')!.textContent = mode === 'battle' ? '' : i < step ? '✓' : '';
-  });
-  el('counter').textContent = mode === 'battle' && battle ? `ВОЛНА ${Math.floor(battle.turn / 3) + 1}` : `${String(Math.min(step, 3)).padStart(2, '0')} / 03`;
+function history() {
+  text("best-score", bestScore.toLocaleString("ru-RU"));
+  text(
+    "history",
+    runs.length
+      ? `Последние бои: ${runs.length} · Победы: ${runs.filter((r) => r.won).length} · Лучшая серия: ${Math.max(...runs.map((r) => r.combo))}`
+      : "Первый разлом ещё впереди.",
+  );
 }
+history();
 
-function resetLesson() {
-  mode = 'training'; battle = null;
-  step = 0; elapsed = 0; nextStepAt = 0; evaluator.reset();
-  reading = { hint: '', progress: 0, success: false, holding: false };
-  el('result').hidden = true;
-  el('feedback').hidden = false;
-  el('spell-name').textContent = names[0];
-  el('arena-status').textContent = 'ИНИЦИАЦИЯ';
-  el('portal-caption').hidden = true;
-  el('battle-hud').hidden = true;
-  el('attack-status').hidden = true;
-  el('countdown').hidden = true;
-  el('battle-message').hidden = true;
-  el('feedback').classList.remove('success');
-  el('progress-fill').style.width = '0%';
-  el('progress-label').textContent = '0%';
-  el('restart-hint').textContent = 'Или убери руку из кадра и снова покажи открытую ладонь.';
-  restartArmed = false; restartHold = 0;
-  updateSpellbook();
-  introduceLesson();
-  setHint('Покажи одну руку целиком, ладонью к камере', performance.now(), true);
+function hidePanels() {
+  for (const id of [
+    "start-panel",
+    "calibration",
+    "lesson-demo",
+    "result",
+    "feedback",
+    "battle-hud",
+    "countdown",
+    "cinematic",
+    "battle-message",
+    "portal-caption",
+  ])
+    el(id).hidden = true;
 }
-
-const palmDrawing = '<path class="demo-hand" d="M100 137 C86 129 79 115 71 104 L51 83 C46 76 54 69 61 74 L78 88 V41 C78 30 91 30 91 41 V75 V27 C91 16 105 16 105 27 V73 V20 C105 9 119 9 119 20 V73 V34 C119 23 133 23 133 34 V89 L139 84 C147 79 153 88 149 98 L140 122 C137 132 129 140 121 140 Z"/>';
-
-function introduceLesson() {
-  tutorial.reset(); swipeArmed = false; swipeStartMs = 0;
-  el('lesson-demo').hidden = false;
-  el('feedback').hidden = true;
-  el('swipe-guide').hidden = true;
-  el('lesson-number').textContent = `ЗАКЛИНАНИЕ 0${step + 1} / 03`;
-  el('lesson-title').textContent = ['Создай и перенеси искру', 'Раскрой ладонь. Замри.', 'Взмахни слева направо'][step];
-  el('lesson-instruction').textContent = [
-    'Соедини большой и указательный пальцы. Не размыкая их, перенеси светящуюся искру в центр круга.',
-    'Раскрой все пальцы и поверни ладонь к камере. Держи её на месте, пока зелёный круг не замкнётся.',
-    'Поставь открытую ладонь в левый круг. Затем одним быстрым движением проведи её к правому кругу.',
-  ][step];
-  const drawing = step === 0
-    ? '<path class="demo-hand" fill="none" d="M78 119 Q55 87 84 76 Q113 66 126 83 M159 118 Q176 81 157 53 Q143 40 130 60 L126 83"/><circle class="demo-pinch-ring" cx="126" cy="83" r="5"/><circle class="demo-pinch-ring demo-pinch-dot" cx="126" cy="83" r="5"/><path class="demo-guide" d="M177 82 H240"/><circle class="demo-guide" cx="260" cy="82" r="21"/><text class="demo-small" x="67" y="151">СОЕДИНИ → ПЕРЕНЕСИ</text>'
-    : step === 1
-      ? `<g transform="translate(55 0)">${palmDrawing}<circle class="demo-shield" cx="103" cy="83" r="62"/></g>`
-      : `<path class="demo-guide" d="M58 82 H269 M258 71 L269 82 L258 93"/><g transform="translate(60 0)"><g class="demo-swipe">${palmDrawing}</g></g><text class="demo-small" x="55" y="156">СЛЕВА → НАПРАВО</text>`;
-  el('lesson-animation').innerHTML = `<svg viewBox="0 0 320 170" role="img" aria-label="${el('lesson-title').textContent}">${drawing}</svg>`;
-  el('lesson-arm').textContent = 'Посмотри движение · 3';
-  el('lesson-arm-progress').style.width = '0%';
-}
-
-function resetReading() {
-  evaluator.reset();
-  reading = { hint: '', progress: 0, success: false, holding: false };
-  el('feedback').classList.remove('success');
-  el('progress-fill').style.width = '0%';
-  el('progress-label').textContent = '0%';
-}
-
-function startBattle() {
-  if (!running || !trainingUnlocked) return;
-  battle = new Battle(); mode = 'battle'; step = 0; nextStepAt = 0;
-  resetReading();
-  el('lesson-demo').hidden = true;
-  el('swipe-guide').hidden = true;
-  el('result').hidden = true;
-  el('battle-hud').hidden = false;
-  el('attack-status').hidden = false;
-  el('feedback').hidden = false;
-  el('battle-message').hidden = true;
-  el('arena-status').textContent = 'ЗАКРОЙ РАЗЛОМ';
-  el('spell-name').textContent = names[0];
-  restartArmed = false; restartHold = 0;
-  updateSpellbook();
-  updateBattleHud();
-}
-
-function showResult(finished: boolean) {
-  mode = finished ? 'finished' : 'ready';
-  step = 3; nextStepAt = 0;
-  resetReading();
-  el('lesson-demo').hidden = true;
-  el('swipe-guide').hidden = true;
-  restartArmed = false; restartHold = 0;
-  el('feedback').hidden = true;
-  el('battle-hud').hidden = true;
-  el('attack-status').hidden = true;
-  el('countdown').hidden = true;
-  el('battle-message').hidden = true;
-  el('result').hidden = false;
-  el('restart-progress').style.width = '0%';
-  el('restart-hint').textContent = 'Убери руку из кадра, затем покажи открытую ладонь для старта.';
-  el('result').classList.toggle('defeat', finished && battle?.status === 'defeat');
-  updateSpellbook();
-  if (!finished || !battle) {
-    trainingUnlocked = true;
-    el('arena-status').textContent = 'ИНИЦИАЦИЯ ЗАВЕРШЕНА';
-    el('result-mark').textContent = '✳';
-    el('result-eyebrow').textContent = 'ИНИЦИАЦИЯ ЗАВЕРШЕНА';
-    el('result-title').textContent = 'Теперь закрой разлом.';
-    el('result-description').textContent = '60 секунд · 3 жизни · 9 печатей';
-    el('result-value').textContent = '3 / 3';
-    el('result-value-label').textContent = 'ЗАКЛИНАНИЯ';
-    el('duration').textContent = `${Math.round(elapsed / 1000)} с`;
-    el('duration-label').textContent = 'ВРЕМЯ ОБУЧЕНИЯ';
-    el('result-detail').textContent = 'Выполняй показанное заклинание за 8 секунд. Каждое успешное действие приближает закрытие разлома.';
-    el('restart').innerHTML = 'Начать испытание <span>↗</span>';
-    return;
+function hint(message: string, now: number, immediate = false) {
+  if (message !== pendingHint) {
+    pendingHint = message;
+    hintAt = now;
   }
-  const victory = battle.status === 'victory';
-  const newRecord = battle.score > bestScore;
-  bestScore = Math.max(bestScore, battle.score);
-  try { bestScore = saveBest(localStorage, bestScore); } catch { /* Keep an in-memory record if storage is unavailable. */ }
-  el('best-score').textContent = bestScore.toLocaleString('ru-RU');
-  el('arena-status').textContent = victory ? 'РАЗЛОМ ЗАКРЫТ' : 'ИСПЫТАНИЕ ЗАВЕРШЕНО';
-  el('result-mark').textContent = victory ? '✳' : '◈';
-  el('result-eyebrow').textContent = victory ? 'ПОБЕДА · РАЗЛОМ ЗАКРЫТ' : 'ПОРАЖЕНИЕ · НОВАЯ ПОПЫТКА?';
-  el('result-title').textContent = victory ? 'Тьма отступила.' : 'Разлом оказался сильнее.';
-  el('result-description').textContent = victory ? 'Все девять печатей на месте. Этот мир в безопасности.' : battle.reason === 'time' ? 'Время вышло. Ставь печати быстрее, чтобы успеть.' : 'Защита иссякла. Следи за подсказкой и временем до атаки.';
-  el('result-value').textContent = battle.score.toLocaleString('ru-RU');
-  el('result-value-label').textContent = newRecord ? 'НОВЫЙ РЕКОРД' : 'ОЧКИ';
-  el('duration').textContent = `${battle.seals} / ${REQUIRED_SEALS}`;
-  el('duration-label').textContent = 'ПЕЧАТИ';
-  el('result-detail').textContent = `Лучшая серия: ${battle.maxCombo} · Энергия: ${battle.casts.pinch} · Щиты: ${battle.casts.shield} · Удары: ${battle.casts.swipe}`;
-  el('restart').innerHTML = 'Ещё один разлом <span>↗</span>';
+  if (immediate || now - hintAt > 170) text("hint", message);
 }
-
-function updateBattleHud() {
-  if (!battle) return;
-  const tracking = !!hand && !hand.quality;
-  const countdown = battle.status === 'countdown';
-  el('countdown').hidden = !countdown;
-  el('countdown-number').textContent = tracking ? String(Math.max(1, Math.ceil(battle.countdownMs / 1000))) : '◎';
-  el('countdown').querySelector('small')!.textContent = tracking ? 'ПРИГОТОВЬСЯ' : 'ПОКАЖИ РУКУ В КАДРЕ';
-  el('time-left').textContent = String(Math.ceil(battle.remainingMs / 1000)).padStart(2, '0');
-  el('time-left').classList.toggle('danger', battle.remainingMs <= 10000);
-  el('health').textContent = Array.from({ length: 3 }, (_, i) => i < battle!.health ? '◆' : '◇').join(' ');
-  el('health').setAttribute('aria-label', `Осталось жизней: ${battle.health}`);
-  el('score').textContent = battle.score.toLocaleString('ru-RU');
-  el('seal-count').textContent = `${battle.seals} / ${REQUIRED_SEALS}`;
-  el('seal-fill').style.width = `${battle.seals / REQUIRED_SEALS * 100}%`;
-  el('attack-fill').style.width = `${battle.attackMs / ATTACK_MS * 100}%`;
-  el('attack-status').classList.toggle('urgent', battle.attackMs < 2500);
-  el('attack-label').textContent = battle.recoveryMs > 0 ? 'СЛЕДУЮЩАЯ АТАКА' : battle.expected === 'pinch' ? 'ДО ВЫБРОСА ЭНЕРГИИ' : battle.expected === 'shield' ? 'ДО ПОПАДАНИЯ' : 'ДО УДАРА КРИСТАЛЛА';
-  el('attack-time').textContent = `${((battle.recoveryMs || battle.attackMs) / 1000).toFixed(1).replace('.', ',')} с`;
-  const message = !tracking && !countdown ? 'Пауза · верни руку целиком в кадр' : battle.recoveryMs > 0 ? battle.event === 'damage' ? 'Защита повреждена · соберись' : `Печать поставлена · серия ${battle.combo}` : '';
-  el('battle-message').hidden = !message;
-  if (el('battle-message').textContent !== message) el('battle-message').textContent = message;
-  el('battle-message').classList.toggle('damage', battle.event === 'damage' && tracking);
+function spellbook(active = -1) {
+  document.querySelectorAll<HTMLElement>(".spell").forEach((spell, i) => {
+    spell.classList.toggle("active", i === active);
+    spell.classList.toggle(
+      "done",
+      mode === "ready" ||
+        mode === "result" ||
+        ((mode === "demo" || mode === "practice") &&
+          practiceList.length === 3 &&
+          i < lessonIndex),
+    );
+    spell.querySelector(".spell-check")!.textContent = spell.classList.contains(
+      "done",
+    )
+      ? "✓"
+      : "";
+  });
 }
-
-function shutdown(note = 'Камера выключена. Можно начать снова.') {
-  requestId++;
-  running = false;
-  mode = 'training'; battle = null;
-  document.body.classList.remove('camera-on');
-  stream?.getTracks().forEach(track => { track.onended = null; track.stop(); });
-  stream = null; video.srcObject = null;
-  model?.close(); model = null;
-  hand = null; points = []; evaluator.reset();
-  sk.clearRect(0, 0, skeleton.width, skeleton.height);
-  nextStepAt = 0; step = 0;
-  el('start-panel').hidden = false;
-  el('feedback').hidden = true;
-  el('result').hidden = true;
-  el('lesson-demo').hidden = true;
-  el('swipe-guide').hidden = true;
-  el('battle-hud').hidden = true;
-  el('attack-status').hidden = true;
-  el('countdown').hidden = true;
-  el('battle-message').hidden = true;
-  el('stop').hidden = true;
-  el('arena-note').hidden = false;
-  el('portal-caption').hidden = false;
-  el('camera-placeholder').hidden = false;
-  el('camera-badge').textContent = 'КАМЕРА ВЫКЛ.';
-  el('arena-status').textContent = 'ОЖИДАНИЕ МАГА';
-  el('tracking-status').textContent = 'СВЯЗЬ НЕ УСТАНОВЛЕНА';
-  el('setup-note').textContent = note;
-  start.disabled = false;
-  start.innerHTML = 'Пробудить силу <span>↗</span>';
-  updateSpellbook();
+function clearMotion() {
+  motion.reset();
+  control = emptyControl();
+  previousPalm = null;
+  resultHold = 0;
 }
-
-start.addEventListener('click', async () => {
-  const token = ++requestId;
-  start.disabled = true;
-  start.textContent = 'Подключаем камеру…';
-  el('setup-note').textContent = 'Разреши доступ к камере в окне браузера.';
+function beginCalibration() {
+  if (!model) return;
+  mode = "calibration";
+  calibrator = new Calibrator();
+  world = null;
+  clearMotion();
+  hidePanels();
+  el("calibration").hidden = false;
+  text("arena-status", "КАЛИБРОВКА");
+  text("counter", "КОМФОРТНЫЙ РАЗМАХ");
+  text(
+    "calibration-hint",
+    "Раскрой ладонь. Проведи ею влево, вправо, вверх и вниз — насколько тебе удобно.",
+  );
+  el("calibration-progress").style.width = "0%";
+  spellbook();
+}
+function finishCalibration(useDefault = false) {
+  calibration = useDefault ? { ...DEFAULT_CALIBRATION } : calibrator.finish();
+  beginTraining();
+}
+function beginTraining(single?: Lesson) {
+  practiceList = single ? [single] : [...lessons];
+  lessonIndex = 0;
+  introduceLesson();
+}
+const palmDrawing =
+  '<path fill="#352441" stroke="#d9bcf7" stroke-width="2" d="M100 137 C86 129 79 115 71 104 L51 83 C46 76 54 69 61 74 L78 88 V41 C78 30 91 30 91 41 V75 V27 C91 16 105 16 105 27 V73 V20 C105 9 119 9 119 20 V73 V34 C119 23 133 23 133 34 V89 L139 84 C147 79 153 88 149 98 L140 122 C137 132 129 140 121 140 Z"/>';
+function introduceLesson() {
+  const lesson = practiceList[lessonIndex],
+    index = lessons.indexOf(lesson);
+  mode = "demo";
+  world = new Arena(lesson);
+  practiceCompleteAt = 0;
+  tutorial.reset();
+  clearMotion();
+  hidePanels();
+  el("lesson-demo").hidden = false;
+  text(
+    "arena-status",
+    practiceList.length === 1 ? "ЛИЧНАЯ ТРЕНИРОВКА" : "ОСВОЕНИЕ МАГИИ",
+  );
+  text("counter", `${lessonIndex + 1} / ${practiceList.length}`);
+  text("lesson-number", `СПОСОБНОСТЬ ${index + 1} · СНАЧАЛА ПОСМОТРИ`);
+  text(
+    "lesson-title",
+    [
+      "Поймай. Взмахни. Отпусти.",
+      "Поставь щит на пути атаки.",
+      "Проведи разрез через цель.",
+    ][index],
+  );
+  text(
+    "lesson-instruction",
+    [
+      "Наведи курсор на синий снаряд и соедини два пальца. Взмахни к глазу наверху и отпусти щипок, пока рука движется.",
+      "Раскрой ладонь и поставь курсор на пунктирную траекторию. Дождись попадания в щит. Важна позиция руки.",
+      "Раскрой ладонь. Быстро проведи курсором через кристалл. Можно двигаться горизонтально, вертикально или по диагонали.",
+    ][index],
+  );
+  const drawing =
+    index === 0
+      ? '<path class="demo-guide" d="M90 115 L230 42"/><circle class="demo-pinch-ring demo-pinch-dot" cx="110" cy="96" r="10"/><ellipse class="demo-guide" cx="232" cy="40" rx="23" ry="12"/><text class="demo-small" x="60" y="151">ЩИПОК → ВЗМАХ → ОТПУСТИ</text>'
+      : index === 1
+        ? `<g transform="translate(55 0)">${palmDrawing}<circle class="demo-shield" cx="103" cy="83" r="62"/></g>`
+        : `<path class="demo-guide" d="M40 92 H280"/><path fill="#9e62b0" stroke="#e5b4f7" d="M210 48 L233 85 L210 121 L187 85 Z"/><g transform="translate(60 0)"><g class="demo-swipe">${palmDrawing}</g></g>`;
+  el("lesson-animation").innerHTML =
+    `<svg viewBox="0 0 320 170" role="img" aria-label="Показ движения">${drawing}</svg>`;
+  el("lesson-demo").dataset.phase = "demo";
+  text("lesson-arm", "Посмотри движение · 3");
+  el("lesson-arm-progress").style.width = "0%";
+  text("spell-name", names[index]);
+  spellbook(index);
+}
+function startPractice() {
+  mode = "practice";
+  el("lesson-demo").hidden = true;
+  el("feedback").hidden = false;
+  clearMotion();
+  text("progress-label", "ПОПРОБУЙ");
+  el("progress-fill").style.width = "0%";
+  hint(
+    [
+      "Наведи курсор на синий снаряд и соедини большой и указательный пальцы",
+      "Останови снаряд щитом: раскрой ладонь на пунктирной траектории",
+      "Быстро проведи открытой ладонью через кристалл",
+    ][lessons.indexOf(practiceList[lessonIndex])],
+    performance.now(),
+    true,
+  );
+}
+function ready() {
+  mode = "ready";
+  world = null;
+  clearMotion();
+  hidePanels();
+  resultArmed = false;
+  resultGesture = "";
+  recommendation = null;
+  el("result").hidden = false;
+  el("report").hidden = true;
+  el("retrain").hidden = false;
+  el("result").classList.remove("defeat");
+  text("arena-status", "ТЫ ГОТОВ");
+  text("counter", "ДАЛЬШЕ — СВОБОДНЫЙ БОЙ");
+  text("result-mark", "✳");
+  text("result-eyebrow", "МАГИЯ ПОДЧИНЯЕТСЯ ТЕБЕ");
+  text("result-title", "Теперь удержи тьму.");
+  text(
+    "result-description",
+    "Три фазы. Живое ядро. Один противник по ту сторону. Выбирай способности сам.",
+  );
+  text("result-value", "2:30");
+  text("result-value-label", "НА ЗАКРЫТИЕ РАЗЛОМА");
+  text("duration", "100%");
+  text("duration-label", "ПРОЧНОСТЬ ЯДРА");
+  text("restart", "Войти в разлом ↗");
+  text(
+    "restart-hint",
+    "Убери руку из кадра, затем удерживай открытую ладонь 1,5 секунды.",
+  );
+  el("restart-progress").style.width = "0%";
+  spellbook();
+}
+function startBattle() {
+  if (!model) return;
+  mode = "battle";
+  world = new Arena();
+  clearMotion();
+  hidePanels();
+  el("battle-hud").hidden = false;
+  el("feedback").hidden = false;
+  el("countdown").hidden = false;
+  document.body.classList.add("arena-mode");
+  text("arena-status", "ЗАЩИТИ ЯДРО");
+  text("counter", "I · ПЕРВЫЕ ТРЕЩИНЫ");
+  text("spell-name", "СВОБОДНЫЙ БОЙ");
+  spellbook();
+  hint(
+    "Лови синие снаряды. Щит ставь на пути атаки. Разрезом пересекай кристаллы.",
+    performance.now(),
+    true,
+  );
+}
+function showResult() {
+  if (!world || mode !== "battle") return;
+  const won = world.status === "victory";
+  recommendation = advice(world.stats);
+  const record = world.score > bestScore;
+  bestScore = Math.max(bestScore, world.score);
+  runs.push({
+    score: world.score,
+    won,
+    hits: world.stats.damage,
+    combo: world.maxCombo,
+  });
+  runs = runs.slice(-8);
   try {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Для камеры открой сайт через HTTPS или localhost.');
-    const acquired = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
-    if (token !== requestId) { acquired.getTracks().forEach(track => track.stop()); return; }
+    saveBest(localStorage, bestScore);
+    localStorage.setItem("rift.runs.v2", JSON.stringify(runs));
+  } catch {
+    /* Keep progress for this session. */
+  }
+  history();
+  mode = "result";
+  hidePanels();
+  resultArmed = false;
+  resultHold = 0;
+  resultGesture = "";
+  el("result").hidden = false;
+  el("report").hidden = false;
+  el("retrain").hidden = true;
+  el("result").classList.toggle("defeat", !won);
+  text("arena-status", won ? "РАЗЛОМ ЗАКРЫТ" : "БОЙ ЗАВЕРШЁН");
+  text("result-mark", won ? "✳" : "◈");
+  text(
+    "result-eyebrow",
+    won ? "ПОБЕДА · РАЗЛОМ ЗАКРЫТ" : "ПОРАЖЕНИЕ · ЕЩЁ ОДНА ПОПЫТКА",
+  );
+  text("result-title", won ? "Тьма отступила." : "Ты ещё вернёшься.");
+  text(
+    "result-description",
+    won
+      ? "Ядро уцелело. По ту сторону стало тихо."
+      : world.health <= 0
+        ? "Ядро не выдержало атак. Посмотри, что можно улучшить."
+        : "Время вышло. В последней фазе атакуй открытый глаз и возвращай его снаряды.",
+  );
+  text("result-value", world.score.toLocaleString("ru-RU"));
+  text("result-value-label", record ? "НОВЫЙ РЕКОРД" : "ОЧКИ");
+  text("duration", `×${world.maxCombo}`);
+  text("duration-label", "ЛУЧШАЯ СЕРИЯ");
+  text(
+    "result-detail",
+    `Возвраты: ${world.stats.returns}/${world.stats.throws} · Блоки: ${world.stats.blocks} · Парирования: ${world.stats.parries} · Разрезы в цель: ${world.stats.cutHits}/${world.stats.cuts}`,
+  );
+  text("advice-title", recommendation.title);
+  text("advice-detail", recommendation.detail);
+  text("restart", "Ещё один разлом ↗");
+  text(
+    "restart-hint",
+    "Убери руку. Ладонь — новый бой, кулак — тренировка по совету.",
+  );
+  el("restart-progress").style.width = "0%";
+  spellbook();
+}
+
+function shutdown(message = "Камера выключена. Можно начать снова.") {
+  generation++;
+  mode = "idle";
+  world = null;
+  clearMotion();
+  hand = null;
+  stream?.getTracks().forEach((track) => {
+    track.onended = null;
+    track.stop();
+  });
+  stream = null;
+  video.srcObject = null;
+  model?.close();
+  model = null;
+  hidePanels();
+  sound.suspend();
+  sk.clearRect(0, 0, skeleton.width, skeleton.height);
+  document.body.classList.remove("camera-on", "arena-mode");
+  el("start-panel").hidden = false;
+  el("portal-caption").hidden = false;
+  el("camera-placeholder").hidden = false;
+  el("stop").hidden = true;
+  el("recalibrate").hidden = true;
+  const start = el<HTMLButtonElement>("start");
+  start.disabled = false;
+  text("start", "Пробудить силу ↗");
+  text("setup-note", message);
+  text("camera-badge", "КАМЕРА ВЫКЛ.");
+  text("arena-status", "ОЖИДАНИЕ МАГА");
+  text("tracking-status", "✧ СВЯЗЬ НЕ УСТАНОВЛЕНА");
+  spellbook();
+}
+el("start").addEventListener("click", async () => {
+  const token = ++generation;
+  mode = "loading";
+  el<HTMLButtonElement>("start").disabled = true;
+  text("start", "Подключаем камеру…");
+  text("setup-note", "Разреши доступ в окне браузера.");
+  void sound.unlock();
+  try {
+    if (!navigator.mediaDevices?.getUserMedia)
+      throw new Error("Для камеры открой сайт через HTTPS или localhost.");
+    const acquired = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+      audio: false,
+    });
+    if (token !== generation) {
+      acquired.getTracks().forEach((track) => track.stop());
+      return;
+    }
     stream = acquired;
     video.srcObject = acquired;
     await video.play();
-    if (token !== requestId) return;
-    el('stop').hidden = false;
-    el('arena-note').hidden = true;
-    el('camera-placeholder').hidden = true;
-    el('camera-badge').textContent = 'ПОДКЛЮЧЕНА';
-    start.textContent = 'Настраиваем распознавание…';
-    el('setup-note').textContent = 'Первая загрузка может занять несколько секунд.';
-    const files = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm`);
-    const options = { baseOptions: { modelAssetPath: `${import.meta.env.BASE_URL}mediapipe/hand_landmarker.task`, delegate: 'GPU' as const }, runningMode: 'VIDEO' as const, numHands: 1, minHandDetectionConfidence: 0.6, minHandPresenceConfidence: 0.6, minTrackingConfidence: 0.6 };
+    if (token !== generation) return;
+    el("stop").hidden = false;
+    el("camera-placeholder").hidden = true;
+    text("camera-badge", "ПОДКЛЮЧЕНА");
+    text("start", "Пробуждаем магию…");
+    text(
+      "setup-note",
+      "Загружается распознавание. Кадры остаются на устройстве.",
+    );
+    const files = await FilesetResolver.forVisionTasks(
+      `${import.meta.env.BASE_URL}mediapipe/wasm`,
+    );
+    const options = {
+      baseOptions: {
+        modelAssetPath: `${import.meta.env.BASE_URL}mediapipe/hand_landmarker.task`,
+        delegate: "GPU" as const,
+      },
+      runningMode: "VIDEO" as const,
+      numHands: 2,
+      minHandDetectionConfidence: 0.6,
+      minHandPresenceConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+    };
     let loaded: HandLandmarker;
-    try { loaded = await HandLandmarker.createFromOptions(files, options); }
-    catch { loaded = await HandLandmarker.createFromOptions(files, { ...options, baseOptions: { ...options.baseOptions, delegate: 'CPU' } }); }
-    if (token !== requestId) { loaded.close(); return; }
+    try {
+      loaded = await HandLandmarker.createFromOptions(files, options);
+    } catch {
+      loaded = await HandLandmarker.createFromOptions(files, {
+        ...options,
+        baseOptions: { ...options.baseOptions, delegate: "CPU" },
+      });
+    }
+    if (token !== generation) {
+      loaded.close();
+      return;
+    }
     model = loaded;
-    stream!.getVideoTracks()[0].onended = () => shutdown('Камера отключилась. Подключи её и начни снова.');
-    lastVideoTime = -1;
-    running = true;
-    document.body.classList.add('camera-on');
-    el('start-panel').hidden = true;
-    resetLesson();
+    stream!.getVideoTracks()[0].onended = () =>
+      shutdown("Камера отключилась. Подключи её и начни снова.");
+    lastVideo = -1;
+    lastInference = 0;
+    el("recalibrate").hidden = false;
+    document.body.classList.add("camera-on");
+    beginCalibration();
   } catch (error) {
-    if (token !== requestId) return;
-    const name = error instanceof Error ? error.name : '';
-    const message = name === 'NotAllowedError' ? 'Разреши доступ к камере в настройках сайта и попробуй снова.' : name === 'NotFoundError' ? 'Камера не найдена. Подключи веб-камеру и попробуй снова.' : name === 'NotReadableError' ? 'Камера занята другим приложением. Освободи её и попробуй снова.' : error instanceof Error && error.message.startsWith('Для камеры') ? error.message : 'Не удалось загрузить распознавание. Проверь подключение и попробуй снова.';
+    if (token !== generation) return;
+    const name = error instanceof Error ? error.name : "";
+    const message =
+      name === "NotAllowedError"
+        ? "Разреши доступ к камере в настройках сайта и попробуй снова."
+        : name === "NotFoundError"
+          ? "Камера не найдена. Подключи веб-камеру."
+          : name === "NotReadableError"
+            ? "Камера занята. Закрой приложение, которое её использует."
+            : error instanceof Error && error.message.startsWith("Для камеры")
+              ? error.message
+              : "Не удалось загрузить распознавание. Проверь подключение и попробуй снова.";
     console.error(error);
     shutdown(message);
   }
 });
-el('stop').addEventListener('click', () => shutdown());
-el('restart').addEventListener('click', startBattle);
-el('retrain').addEventListener('click', resetLesson);
-window.addEventListener('pagehide', () => shutdown());
-document.addEventListener('visibilitychange', () => {
-  evaluator.reset(); hand = null; points = []; restartHold = 0;
-  tutorial.pause(); swipeArmed = false; swipeStartMs = 0;
-  // A success transition resumes after the tab is visible again.
-  if (nextStepAt) nextStepAt = performance.now() + 900;
-  lastFrame = performance.now();
+el("stop").addEventListener("click", () => shutdown());
+el("default-calibration").addEventListener("click", () =>
+  finishCalibration(true),
+);
+el("recalibrate").addEventListener("click", beginCalibration);
+el("restart").addEventListener("click", startBattle);
+el("retrain").addEventListener("click", () => beginTraining());
+el("drill").addEventListener("click", () =>
+  beginTraining(recommendation?.lesson),
+);
+el("sound").addEventListener("click", () => {
+  sound.toggle();
+  text("sound", sound.enabled ? "♫ ЗВУК ВКЛ." : "♫ ЗВУК ВЫКЛ.");
+  el("sound").setAttribute("aria-pressed", String(sound.enabled));
 });
-
-const connections = [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]];
-function drawSkeleton() {
-  if (video.videoWidth && (skeleton.width !== video.videoWidth || skeleton.height !== video.videoHeight)) { skeleton.width = video.videoWidth; skeleton.height = video.videoHeight; }
-  sk.clearRect(0, 0, skeleton.width, skeleton.height);
-  if (points.length !== 21) return;
-  sk.strokeStyle = hand?.quality ? '#ffc586' : '#a8f0ca'; sk.fillStyle = sk.strokeStyle; sk.lineWidth = 2;
-  connections.forEach(chain => {
-    sk.beginPath(); chain.forEach((index, i) => { const p = points[index]; if (i) sk.lineTo(p.x * skeleton.width, p.y * skeleton.height); else sk.moveTo(p.x * skeleton.width, p.y * skeleton.height); }); sk.stroke();
-  });
-  points.forEach(p => { sk.beginPath(); sk.arc(p.x * skeleton.width, p.y * skeleton.height, 3, 0, Math.PI * 2); sk.fill(); });
-}
-
-function processFrame(now: number, dt: number) {
-  if (!running || !model || video.readyState < 2 || document.hidden) return;
-  if (now - lastInference > 500) { hand = null; points = []; restartHold = 0; }
-  if (mode === 'training' && step < 3) elapsed += dt;
-  if (mode === 'battle' && battle) {
-    const previousTurn = battle.turn;
-    const previousHealth = battle.health;
-    battle.tick(dt, !!hand && !hand.quality);
-    if (battle.health < previousHealth) {
-      damageAt = now;
-      resetReading();
-      setHint('Не успел завершить заклинание. Готовься к следующему.', now, true);
-    }
-    if (battle.turn !== previousTurn) {
-      resetReading();
-      step = lessons.indexOf(battle.expected);
-      updateSpellbook();
-      el('spell-name').textContent = names[step];
-      setHint(['Соедини пальцы и перенеси искру в центр разлома', 'Останови снаряд — раскрой ладонь и удерживай её', 'Разбей кристалл — взмахни открытой ладонью'][step], now, true);
-    }
-    updateBattleHud();
-    if (battle.ended) showResult(true);
-  }
-  if (mode === 'training' && nextStepAt && now >= nextStepAt) {
-    step++; nextStepAt = 0; evaluator.reset(); updateSpellbook();
-    reading = { hint: '', progress: 0, success: false, holding: false };
-    if (step === 3) {
-      showResult(false);
-    } else {
-      introduceLesson();
-      el('feedback').classList.remove('success');
-      el('spell-name').textContent = names[step];
-      setHint(step === 1 ? 'Раскрой ладонь и удерживай её на месте' : 'Взмахни открытой ладонью горизонтально', now, true);
-    }
-  }
-  if (now - lastInference < 40 || video.currentTime === lastVideoTime) return;
-  lastVideoTime = video.currentTime;
-  const inferenceDt = Math.min(100, now - lastInference);
+window.addEventListener("pagehide", () => shutdown());
+document.addEventListener("visibilitychange", () => {
+  clearMotion();
+  hand = null;
+  tutorial.pause();
+  calibrator.fistMs = 0;
+  lastFrame = performance.now();
+  if (document.hidden) sound.suspend();
+  else if (model) void sound.unlock();
+  if (practiceCompleteAt) practiceCompleteAt = performance.now() + 700;
+});
+const connections = [
+  [0, 1, 2, 3, 4],
+  [0, 5, 6, 7, 8],
+  [5, 9, 10, 11, 12],
+  [9, 13, 14, 15, 16],
+  [13, 17, 18, 19, 20],
+  [0, 17],
+];
+function infer(now: number): boolean {
+  if (
+    !model ||
+    video.readyState < 2 ||
+    now - lastInference < 40 ||
+    video.currentTime === lastVideo
+  )
+    return false;
+  const dt = Math.min(100, now - lastInference);
   lastInference = now;
+  lastVideo = video.currentTime;
+  let landmarks: Point[][];
   try {
-    points = model.detectForVideo(video, now).landmarks[0] ?? [];
+    landmarks = model.detectForVideo(video, now).landmarks;
   } catch (error) {
     console.error(error);
-    shutdown('Распознавание остановилось. Попробуй включить камеру снова.');
-    return;
+    shutdown("Распознавание остановилось. Включи камеру снова.");
+    return false;
   }
-  hand = describeHand(points, video.videoWidth / video.videoHeight);
-  el('tracking-status').textContent = hand ? hand.quality ? 'ПОПРАВЬ ПОЛОЖЕНИЕ РУКИ' : 'РУКА РАСПОЗНАНА' : 'ПОКАЖИ РУКУ В КАДРЕ';
-  drawSkeleton();
-  if (mode === 'training' && tutorial.phase !== 'practice') {
-    const practicing = tutorial.update(hand, now);
-    el('lesson-demo').dataset.phase = tutorial.phase;
-    const message = tutorial.phase === 'demo' ? `Посмотри движение · ${Math.max(1, Math.ceil(tutorial.remainingMs / 1000))}` : hand?.quality ?? 'Сожми кулак на полсекунды, когда будешь готов';
-    if (el('lesson-arm').textContent !== message) el('lesson-arm').textContent = message;
-    el('lesson-arm-progress').style.width = `${tutorial.fistMs / 400 * 100}%`;
-    setHint(tutorial.phase === 'demo' ? 'Сначала посмотри пример. Сейчас жесты не засчитываются.' : 'Сожми кулак, затем выполни показанное движение.', now, true);
-    if (practicing) {
-      el('lesson-demo').hidden = true;
-      el('feedback').hidden = false;
-      el('swipe-guide').hidden = step !== 2;
-      resetReading();
+  const hands = landmarks.map((points) =>
+    describeHand(points, video.videoWidth / video.videoHeight),
+  );
+  let index = 0;
+  if (previousPalm && hands.length > 1) {
+    const d = (candidate: Hand | null) =>
+      candidate
+        ? Math.hypot(
+            (candidate.palm ?? candidate.cursor).x - previousPalm!.x,
+            (candidate.palm ?? candidate.cursor).y - previousPalm!.y,
+          )
+        : Infinity;
+    if (d(hands[1]) < d(hands[0])) index = 1;
+  }
+  hand = hands[index] ?? null;
+  previousPalm = hand?.palm ?? hand?.cursor ?? null;
+  control = motion.update(hand, hands[1 - index] ?? null, now, calibration);
+  text(
+    "tracking-status",
+    hand ? (hand.quality ?? "✧ РУКА РАСПОЗНАНА") : "✧ ПОКАЖИ РУКУ В КАДРЕ",
+  );
+  if (
+    skeleton.width !== video.videoWidth ||
+    skeleton.height !== video.videoHeight
+  ) {
+    skeleton.width = video.videoWidth;
+    skeleton.height = video.videoHeight;
+  }
+  sk.clearRect(0, 0, skeleton.width, skeleton.height);
+  landmarks.forEach((points, i) => {
+    sk.strokeStyle = i === index ? "#b4efd9" : "#e1c1ff";
+    sk.fillStyle = sk.strokeStyle;
+    sk.lineWidth = 2;
+    connections.forEach((chain) => {
+      sk.beginPath();
+      chain.forEach((n, j) => {
+        const p = points[n];
+        if (j) sk.lineTo(p.x * skeleton.width, p.y * skeleton.height);
+        else sk.moveTo(p.x * skeleton.width, p.y * skeleton.height);
+      });
+      sk.stroke();
+    });
+    points.forEach((p) => {
+      sk.beginPath();
+      sk.arc(p.x * skeleton.width, p.y * skeleton.height, 2.5, 0, Math.PI * 2);
+      sk.fill();
+    });
+  });
+  if (mode === "calibration") {
+    calibrator.update(hand, dt);
+    const p = hand?.palm ?? { x: 0.5, y: 0.5 },
+      b = calibrator.bounds;
+    el("calibration-cursor").style.left = `${p.x * 100}%`;
+    el("calibration-cursor").style.top = `${p.y * 100}%`;
+    Object.assign(el("calibration-range").style, {
+      left: `${b.minX * 100}%`,
+      top: `${b.minY * 100}%`,
+      width: `${Math.max(0, b.maxX - b.minX) * 100}%`,
+      height: `${Math.max(0, b.maxY - b.minY) * 100}%`,
+    });
+    el("calibration").classList.toggle("calibrated", calibrator.ready);
+    text(
+      "calibration-hint",
+      hand?.quality ??
+        (!hand
+          ? "Покажи раскрытую ладонь целиком перед камерой"
+          : calibrator.ready
+            ? "Размах запомнен. Сожми кулак, чтобы начать обучение."
+            : b.maxX - b.minX < 0.2
+              ? "Медленно проведи открытую ладонь влево и вправо"
+              : "Теперь проведи ладонь вверх и вниз в удобном диапазоне"),
+    );
+    el("calibration-progress").style.width =
+      `${(calibrator.fistMs / 500) * 100}%`;
+    if (calibrator.fistMs >= 500) finishCalibration();
+  } else if (mode === "demo") {
+    const ready = tutorial.update(hand, now);
+    el("lesson-demo").dataset.phase = tutorial.phase;
+    text(
+      "lesson-arm",
+      tutorial.phase === "demo"
+        ? `Посмотри движение · ${Math.max(1, Math.ceil(tutorial.remainingMs / 1000))}`
+        : (hand?.quality ?? "Сожми кулак на полсекунды, когда будешь готов"),
+    );
+    el("lesson-arm-progress").style.width = `${(tutorial.fistMs / 400) * 100}%`;
+    if (ready) startPractice();
+  } else if (mode === "ready" || mode === "result") {
+    if (!hand) resultArmed = true;
+    const gesture = hand?.open
+      ? "open"
+      : hand && hand.extended === 0 && mode === "result"
+        ? "fist"
+        : "";
+    if (gesture !== resultGesture) {
+      resultHold = 0;
+      resultGesture = gesture;
     }
-    return;
+    resultHold =
+      resultArmed && gesture && hand && !hand.quality ? resultHold + dt : 0;
+    if (resultArmed)
+      text(
+        "restart-hint",
+        mode === "result"
+          ? "Ладонь — ещё бой. Кулак — тренировка по совету. Удерживай 1,5 секунды."
+          : "Удерживай открытую ладонь 1,5 секунды для старта.",
+      );
+    el("restart-progress").style.width =
+      `${Math.min(100, (resultHold / 1500) * 100)}%`;
+    if (resultHold >= 1500) {
+      if (gesture === "fist") beginTraining(recommendation?.lesson);
+      else startBattle();
+    }
   }
-  if (mode === 'ready' || mode === 'finished') {
-    if (!hand) restartArmed = true;
-    restartHold = restartArmed && hand?.open && !hand.quality ? restartHold + inferenceDt : 0;
-    if (restartArmed) el('restart-hint').textContent = 'Удерживай открытую ладонь 1,5 секунды, чтобы начать бой.';
-    el('restart-progress').style.width = `${Math.min(100, restartHold / 1500 * 100)}%`;
-    if (restartHold >= 1500) startBattle();
-    return;
-  }
-  if (mode === 'battle' && battle && (battle.status === 'countdown' || battle.recoveryMs > 0)) {
-    evaluator.reset();
-    if (battle.status === 'countdown') setHint(hand?.quality ?? (hand ? 'Приготовь щипок: после отсчёта перенеси энергию в центр' : 'Покажи одну руку целиком, ладонью к камере'), now);
-    return;
-  }
-  if (nextStepAt) return;
-  if (mode === 'training' && step === 2 && !swipeArmed) {
-    const atStart = hand?.open && !hand.quality && Math.hypot(hand.cursor.x - 0.3, hand.cursor.y - 0.48) < 0.13;
-    swipeStartMs = atStart ? swipeStartMs + inferenceDt : 0;
-    setHint(hand?.quality ?? (!hand ? 'Покажи руку целиком в кадре' : !hand.open ? 'Раскрой ладонь и поставь курсор в левый круг' : 'Наведи курсор на левый круг и ненадолго задержи руку'), now);
-    el('swipe-guide').dataset.armed = 'false';
-    if (swipeStartMs < 180) return;
-    swipeArmed = true; swipeStartX = hand!.cursor.x; evaluator.reset();
-    el('swipe-guide').dataset.armed = 'true';
-    setHint('Теперь резко проведи ладонью вправо, к светящемуся кругу', now, true);
-  }
-  if (mode === 'training' && step === 2 && (!hand || hand.quality || !hand.open)) {
-    swipeArmed = false; swipeStartMs = 0; evaluator.reset();
-  }
-  reading = evaluator.update(lessons[step], hand, now);
-  if (mode === 'training' && step === 2 && reading.success && hand && hand.cursor.x < swipeStartX) {
-    swipeArmed = false; swipeStartMs = 0; resetReading();
-    setHint('Начни с левого круга и проведи ладонью вправо по стрелке', now, true);
-    return;
-  }
-  setHint(reading.hint, now, reading.success);
-  el('progress-fill').style.width = `${reading.progress * 100}%`;
-  el('progress-label').textContent = `${Math.round(reading.progress * 100)}%`;
-  el('feedback').classList.toggle('success', reading.success);
-  if (reading.success) {
-    flashAt = now; lastCast = lessons[step];
-    if (mode === 'battle' && battle) {
-      battle.cast(lessons[step]);
-      updateBattleHud();
-      if (battle.ended) showResult(true);
-    } else nextStepAt = now + 1000;
-  }
+  return true;
 }
-
-function drawScene(now: number) {
-  const rect = scene.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio, 2);
-  if (scene.width !== Math.round(rect.width * dpr) || scene.height !== Math.round(rect.height * dpr)) { scene.width = Math.round(rect.width * dpr); scene.height = Math.round(rect.height * dpr); }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const w = rect.width, h = rect.height, x = w / 2, y = h / 2;
-  const radius = Math.min(w * 0.25, h * 0.27);
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const t = reduced ? 0 : now / 1000;
-  ctx.clearRect(0, 0, w, h);
-  const glow = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.1);
-  glow.addColorStop(0, '#7765ff22'); glow.addColorStop(0.5, '#6e57e519'); glow.addColorStop(1, '#6e57e500');
-  ctx.fillStyle = glow; ctx.fillRect(0, 0, w, h);
-  ctx.save(); ctx.translate(x, y);
-  for (let ring = 0; ring < 5; ring++) {
-    ctx.save(); ctx.rotate(t * (ring % 2 ? -0.08 : 0.1) + ring * 0.7);
-    ctx.strokeStyle = ring === 2 ? '#b8a9ffb0' : '#8f7ee838'; ctx.lineWidth = ring === 2 ? 1.5 : 0.8;
-    ctx.beginPath(); ctx.ellipse(0, 0, radius * (0.75 + ring * 0.075), radius * (0.86 + ring * 0.06), ring * 0.2, 0, Math.PI * 2); ctx.stroke();
-    if (ring === 3) {
-      for (let n = 0; n < 40; n++) { const a = n / 40 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(Math.cos(a) * radius * 1.12, Math.sin(a) * radius * 1.12); ctx.lineTo(Math.cos(a) * radius * 1.16, Math.sin(a) * radius * 1.16); ctx.stroke(); }
-    }
-    ctx.restore();
+function updateHud(now: number) {
+  if (!world) return;
+  if (mode === "battle") {
+    const seconds = Math.ceil(world.remainingMs / 1000);
+    text(
+      "time-left",
+      `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`,
+    );
+    text("health", `${world.health}%`);
+    text("score", world.score.toLocaleString("ru-RU"));
+    text("combo", `×${world.combo}`);
+    text(
+      "counter",
+      ["I · ПЕРВЫЕ ТРЕЩИНЫ", "II · ВТОРЖЕНИЕ", "III · ПРОБУЖДЕНИЕ"][
+        world.phase
+      ],
+    );
+    text("boss-name", world.phase === 2 ? "НАБЛЮДАТЕЛЬ" : "ЗАВЕСА");
+    text(
+      "boss-state",
+      world.phase === 2
+        ? world.exposed
+          ? "ГЛАЗ ОТКРЫТ — АТАКУЙ"
+          : "ГОТОВИТ ЗАЛП"
+        : "ЗАЩИЩАЙ ЯДРО",
+    );
+    el("boss-fill").style.width =
+      `${world.phase === 2 ? (world.bossHp / 240) * 100 : 100 - (world.elapsed / 65000) * 100}%`;
+    text("shield-value", `${Math.round(world.shieldEnergy)}%`);
+    text(
+      "energy-value",
+      world.energy >= 100 ? "ГОТОВА ∞" : `${Math.round(world.energy)}%`,
+    );
+    el("energy-value").classList.toggle("ready-energy", world.energy >= 100);
+    el("countdown").hidden = world.status !== "countdown";
+    text(
+      "countdown-number",
+      control.valid
+        ? String(Math.max(1, Math.ceil(world.countdownMs / 1000)))
+        : "◎",
+    );
+    el("battle-message").hidden = control.valid;
+    text("battle-message", "Пауза · верни руку целиком в кадр");
+    text(
+      "spell-name",
+      world.held
+        ? "ТЕЛЕКИНЕЗ · СНАРЯД В РУКЕ"
+        : world.shieldActive
+          ? "ЩИТ АКТИВЕН"
+          : "СВОБОДНЫЙ БОЙ",
+    );
+    text(
+      "progress-label",
+      world.domainHold > 0
+        ? "РАСШИРЕНИЕ…"
+        : world.domainMs > 0
+          ? "ВРЕМЯ ЗАМЕДЛЕНО"
+          : world.combo > 2
+            ? `СЕРИЯ ×${world.combo}`
+            : "ВЫБИРАЙ СПОСОБНОСТЬ",
+    );
+    el("progress-fill").style.width =
+      `${world.domainHold > 0 ? world.domainHold / 10 : world.held ? Math.min(100, world.heldMs / 6.5) : world.shieldActive ? world.shieldEnergy : world.energy}%`;
   }
-  ctx.rotate(-t * 0.06);
-  ctx.strokeStyle = '#a799ff45'; ctx.beginPath();
-  for (let i = 0; i <= 6; i++) { const a = i * Math.PI / 3; const px = Math.cos(a) * radius * 0.77; const py = Math.sin(a) * radius * 0.77; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.stroke();
-  ctx.rotate(t * 0.06);
-  ctx.fillStyle = '#dfd8ff'; ctx.font = `${radius * 0.42}px Georgia`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✳', 0, 0);
-  ctx.restore();
-  for (let i = 0; i < 42; i++) { const px = ((i * 137.5) % w), py = ((i * 73.3 + t * (3 + i % 3)) % h); ctx.fillStyle = `rgba(185,173,250,${0.08 + i % 4 * 0.06})`; ctx.fillRect(px, py, i % 3 === 0 ? 2 : 1, 2); }
-  if (running && step < 3 && (mode === 'training' || mode === 'battle')) {
-    const attacking = mode === 'battle' && battle?.status === 'fighting' && !battle.recoveryMs;
-    if (step === 2) {
-      ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4 + (reduced ? 0 : Math.sin(t) * 0.12));
-      ctx.shadowBlur = 28; ctx.shadowColor = '#c695ff';
-      ctx.fillStyle = '#6c428a'; ctx.strokeStyle = '#e0baff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(-30, -30); ctx.lineTo(30, -30); ctx.lineTo(30, 30); ctx.lineTo(-30, 30); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0; ctx.strokeStyle = '#d4acff88'; ctx.beginPath(); ctx.moveTo(-30,-30); ctx.lineTo(30,30); ctx.moveTo(30,-30); ctx.lineTo(-30,30); ctx.stroke(); ctx.restore();
-    }
-    if (step === 1 && attacking && battle) {
-      const approach = 1 - battle.attackMs / ATTACK_MS;
-      const px = x + radius * (1.9 - approach * 1.15), py = y - radius * (1.45 - approach * 1.05);
-      const fire = ctx.createRadialGradient(px, py, 0, px, py, 28);
-      fire.addColorStop(0, '#fff0cc'); fire.addColorStop(0.2, '#ffc184'); fire.addColorStop(0.5, '#ef766499'); fire.addColorStop(1, '#ef766400');
-      ctx.fillStyle = fire; ctx.beginPath(); ctx.arc(px, py, 28, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#f7ae8955'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(px + 12, py - 7); ctx.lineTo(px + 45, py - 27); ctx.stroke();
-    }
-    if (step === 1 && reading.progress > 0) {
-      ctx.strokeStyle = `rgba(167,239,204,${reading.progress})`; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(x, y, radius * 1.3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reading.progress); ctx.stroke();
-    }
-  }
-  if (hand && !hand.quality && running && step < 3 && (mode === 'training' || mode === 'battle')) {
-    const px = hand.cursor.x * w, py = hand.cursor.y * h;
-    ctx.strokeStyle = '#c9bfff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(px, py, reading.holding ? 15 : 9, 0, Math.PI * 2); ctx.stroke();
-    if (reading.holding && step === 0) { ctx.shadowColor = '#ad91ff'; ctx.shadowBlur = 25; ctx.fillStyle = '#e3daff'; ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; }
-  }
-  const flash = 1 - (now - flashAt) / 900;
-  if (flash > 0) { ctx.strokeStyle = `rgba(177,246,211,${flash})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, radius * (1 + (1 - flash)), 0, Math.PI * 2); ctx.stroke(); }
-  if (flash > 0 && !reduced) {
-    for (let i = 0; i < 18; i++) {
-      const a = i / 18 * Math.PI * 2;
-      const travel = (1 - flash) * radius * 1.4;
-      ctx.fillStyle = lastCast === 'shield' ? `rgba(167,239,204,${flash})` : `rgba(219,183,255,${flash})`;
-      ctx.fillRect(x + Math.cos(a) * travel, y + Math.sin(a) * travel, 3 + flash * 3, 3 + flash * 3);
-    }
-    if (lastCast === 'swipe') {
-      ctx.strokeStyle = `rgba(231,216,255,${flash})`; ctx.lineWidth = flash * 5;
-      ctx.beginPath(); ctx.moveTo(x - radius * 1.5, y + 12); ctx.lineTo(x + radius * 1.5, y - 12); ctx.stroke();
-    }
-  }
-  const damage = 1 - (now - damageAt) / 650;
-  if (damage > 0 && !reduced) { ctx.strokeStyle = `rgba(242,130,120,${damage * 0.65})`; ctx.lineWidth = 3; ctx.strokeRect(2, 2, w - 4, h - 4); }
+  if (mode === "practice" && !world.practiceDone) {
+    const instruction =
+      world.practice === "pinch"
+        ? world.held
+          ? "Теперь взмахни к глазу и отпусти пальцы во время движения"
+          : "Наведи курсор на синий снаряд и соедини большой и указательный пальцы"
+        : world.practice === "shield"
+          ? "Раскрой ладонь на пунктирной траектории и дождись снаряда"
+          : "Быстро проведи открытой ладонью прямо через кристалл";
+    hint(
+      control.quality ??
+        (world.elapsed < world.hintUntil ? world.hint : instruction),
+      now,
+    );
+  } else hint(control.quality ?? world.hint, now);
 }
-
-function animate(now: number) {
-  const dt = Math.max(0, now - lastFrame); lastFrame = now;
-  if (!document.hidden) { processFrame(now, dt); drawScene(now); }
-  requestAnimationFrame(animate);
+function frame(now: number) {
+  const dt = Math.max(0, now - lastFrame);
+  lastFrame = now;
+  if (!document.hidden) {
+    if (model) {
+      if (now - lastInference > 500) {
+        clearMotion();
+        hand = null;
+      }
+      infer(now);
+      if ((mode === "battle" || mode === "practice") && world) {
+        world.tick(dt, control);
+        control = { ...control, released: false, slash: null };
+        const events = world.drainEvents();
+        scene.emit(events);
+        events.forEach((event) => {
+          sound.effect(event);
+          if (event.type === "phase" || event.type === "domain") {
+            el("cinematic").hidden = false;
+            text("cinematic-title", event.text ?? "");
+            text(
+              "cinematic-kicker",
+              event.type === "domain"
+                ? "ТВОЯ СОБСТВЕННАЯ ТЕРРИТОРИЯ"
+                : "РАЗЛОМ МЕНЯЕТСЯ",
+            );
+            cinematicUntil = now + 2700;
+          }
+        });
+        updateHud(now);
+        if (world.practiceDone && !practiceCompleteAt) {
+          practiceCompleteAt = now + 1100;
+          text("progress-label", "ОСВОЕНО");
+          el("progress-fill").style.width = "100%";
+          hint("Есть попадание. Способность освоена.", now, true);
+        }
+        if (practiceCompleteAt && now >= practiceCompleteAt) {
+          lessonIndex++;
+          if (lessonIndex < practiceList.length) introduceLesson();
+          else {
+            practiceCompleteAt = 0;
+            ready();
+          }
+        }
+        if (mode === "battle" && world?.ended) showResult();
+      }
+    }
+    if (now > cinematicUntil) el("cinematic").hidden = true;
+    sound.update(
+      mode === "battle" && !!world && !world.paused && !world.ended,
+      world?.phase ?? 0,
+      !!world?.domainMs,
+    );
+    scene.draw(world, control, now);
+  }
+  requestAnimationFrame(frame);
 }
-requestAnimationFrame(animate);
+requestAnimationFrame(frame);
