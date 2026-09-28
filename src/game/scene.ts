@@ -544,6 +544,45 @@ export class Scene {
         c.arc(p.x, p.y, 3, 0, TAU);
         c.fill();
         if (world.magic.stage !== "idle") {
+          if (world.magic.stage === "draw") {
+            const center = to({ x: 0.5, y: 0.52 }),
+              radius = fieldW * 0.22;
+            c.save();
+            c.strokeStyle = "#dfc5ff88";
+            c.lineWidth = 1.4;
+            c.setLineDash([5, 7]);
+            c.beginPath();
+            c.arc(center.x, center.y, radius, 0, TAU);
+            c.stroke();
+            c.setLineDash([]);
+            for (let i = 0; i < 4; i++) {
+              const a = (i * Math.PI) / 2,
+                x = center.x + Math.cos(a) * radius,
+                y = center.y + Math.sin(a) * radius;
+              c.fillStyle = i === 0 ? "#f0d9ff" : "#b496d080";
+              c.beginPath();
+              c.arc(x, y, i === 0 ? 7 : 3, 0, TAU);
+              c.fill();
+            }
+            c.font = "10px Manrope,sans-serif";
+            c.textAlign = "center";
+            c.fillStyle = "#f0d9ff";
+            c.fillText("НАЧНИ ЗДЕСЬ", center.x + radius, center.y - 17);
+            if (!world.magic.drawing && !this.reduced.matches) {
+              const a = t * 1.2;
+              c.fillStyle = "#dfb7ff";
+              c.beginPath();
+              c.arc(
+                center.x + Math.cos(a) * radius,
+                center.y + Math.sin(a) * radius,
+                5,
+                0,
+                TAU,
+              );
+              c.fill();
+            }
+            c.restore();
+          }
           const path = world.magic.path;
           c.strokeStyle = world.magic.circle?.ok
             ? "#ffdf9f"
@@ -577,14 +616,6 @@ export class Scene {
             c.arc(first.x, first.y, 14, 0, TAU);
             c.stroke();
             c.setLineDash([]);
-          } else {
-            this.seal(
-              w * 0.5,
-              oy + fieldH * 0.5,
-              fieldW * 0.19,
-              0,
-              "#d6c0ed28",
-            );
           }
         }
       } else this.trail = [];
@@ -752,5 +783,71 @@ export class Scene {
     vignette.addColorStop(1, "#02030bcc");
     c.fillStyle = vignette;
     c.fillRect(0, 0, w, h);
+    // Both tracked hands stay visible. Numbers refer to roles, not mirrored left/right.
+    if (
+      input.valid &&
+      (!intro || this.presentation.reveal >= 1) &&
+      !world?.ended
+    ) {
+      const cursor = (
+        point: Point,
+        number: number,
+        color: string,
+        active: boolean,
+      ) => {
+        const p = to(point);
+        c.save();
+        c.strokeStyle = color;
+        c.fillStyle = "#100b1de6";
+        c.lineWidth = 2;
+        c.shadowColor = color;
+        c.shadowBlur = active ? 16 : 4;
+        c.beginPath();
+        c.arc(p.x, p.y, active ? 16 : 12, 0, TAU);
+        c.fill();
+        c.stroke();
+        c.shadowBlur = 0;
+        c.fillStyle = color;
+        c.font = "bold 12px Manrope,sans-serif";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.fillText(String(number), p.x, p.y);
+        c.font = "9px Manrope,sans-serif";
+        c.fillText(
+          number === 1
+            ? input.pinching
+              ? "РИСУЮ"
+              : "ТВОЯ МАГИЯ"
+            : "ВТОРАЯ РУКА",
+          p.x,
+          p.y + 25,
+        );
+        if (
+          number === 1 &&
+          world?.practice === "swipe" &&
+          !world.magic.bladeMs &&
+          world.magic.bladeHold > 0
+        ) {
+          c.beginPath();
+          c.arc(
+            p.x,
+            p.y,
+            20,
+            -Math.PI / 2,
+            -Math.PI / 2 + TAU * clamp(world.magic.bladeHold / 300),
+          );
+          c.stroke();
+        }
+        c.restore();
+      };
+      cursor(
+        input.position,
+        1,
+        "#edc6ff",
+        input.pinching || !!world?.magic.bladeMs,
+      );
+      if (input.secondPosition)
+        cursor(input.secondPosition, 2, "#95f4dd", input.secondOpen);
+    }
   }
 }

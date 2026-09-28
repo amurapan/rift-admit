@@ -223,8 +223,8 @@ function introduceLesson() {
     [
       "Покажи ладонь, затем сожми кулак рядом с обломками. Дождись яркого кольца и полностью раскрой ладонь — выпусти волну.",
       "Поставь открытую ладонь на светящуюся траекторию снаряда. Печать примет удар. Подними её перед попаданием, чтобы отразить атаку.",
-      "Удержи указательный и средний пальцы. Когда печать загорится, проведи ими через кристалл. Можно раскрыть ладонь во время взмаха.",
-      "Сблизь две открытые ладони. Щипком нарисуй крупный круг и отпусти пальцы. Затем раскрой обе ладони и разведи их в стороны.",
+      "Одна рука, два пальца: УКАЗАТЕЛЬНЫЙ и СРЕДНИЙ (✌). Согни безымянный и мизинец. Дождись свечения курсора ①, затем взмахни через кристалл.",
+      "Три шага: две открытые ладони рядом → рука ① рисует круг щипком БОЛЬШОГО и УКАЗАТЕЛЬНОГО → две ладони в стороны. Подсказки покажут каждый шаг. В обучении можно не спешить.",
     ][index],
   );
   el("lesson-animation").innerHTML = lessonArt(lesson);
@@ -535,6 +535,13 @@ el("help").addEventListener("click", () => {
   el("help").setAttribute("aria-expanded", String(open));
   clearMotion();
 });
+document
+  .querySelectorAll<HTMLButtonElement>("[data-practice]")
+  .forEach((button) => {
+    button.addEventListener("click", () => {
+      if (model) beginTraining(button.dataset.practice as Lesson);
+    });
+  });
 el("stop").addEventListener("click", () => shutdown());
 el("default-calibration").addEventListener("click", () =>
   finishCalibration(true),
@@ -555,7 +562,7 @@ document.addEventListener("visibilitychange", () => {
   clearMotion();
   hand = null;
   tutorial.pause();
-  world?.magic.reset();
+  world?.magic.pause();
   awakening.hold = 0;
   awakening.armed = false;
   calibrator.fistMs = 0;
@@ -812,6 +819,72 @@ function updateHud(now: number) {
     );
   } else hint(control.quality ?? world.hint, now);
 }
+function updateInputGuide() {
+  const primary = !control.valid
+    ? "не видна"
+    : control.pinching
+      ? "щипок · рисую"
+      : control.bladeSign
+        ? "✌ два пальца"
+        : control.open
+          ? "ладонь раскрыта"
+          : control.fist
+            ? "кулак"
+            : "поза не принята";
+  const secondary =
+    control.secondQuality ??
+    (!control.twoHands
+      ? "не видна"
+      : control.secondOpen
+        ? "ладонь раскрыта"
+        : control.secondSign
+          ? "✌ два пальца"
+          : "раскрой ладонь");
+  text("primary-hand-state", `① ${primary}`);
+  text("second-hand-state", `② ${secondary}`);
+  el("primary-hand-state").dataset.seen = String(control.valid);
+  el("second-hand-state").dataset.seen = String(control.twoHands);
+  text("awakening-hands-status", `① ${primary} · ② ${secondary}`);
+  const magic = world?.magic;
+  const domain =
+    !!world &&
+    (world.practice === "domain" ||
+      magic?.stage !== "idle" ||
+      (world.energy >= 100 && !world.domainMs));
+  const blade = world?.practice === "swipe";
+  el("second-hand-state").hidden = !domain && !control.twoHands;
+  if (world?.practiceDone) {
+    el("ritual-steps").hidden = true;
+    return;
+  }
+  el("ritual-steps").hidden = !(domain || blade);
+  const steps = domain
+    ? ["Две ладони рядом", "Круг щипком · рука ①", "Две ладони в стороны"]
+    : ["✌ Печать одной рукой", "Взмах через цель"];
+  const active = domain
+    ? magic?.stage === "draw"
+      ? 1
+      : magic?.stage === "release"
+        ? 2
+        : 0
+    : magic?.bladeMs
+      ? 1
+      : 0;
+  el("ritual-steps")
+    .querySelectorAll("li")
+    .forEach((item, i) => {
+      item.hidden = i >= steps.length;
+      item.textContent = `${i < active ? "✓" : i + 1} ${steps[i] ?? ""}`;
+      item.classList.toggle("active", i === active);
+      item.classList.toggle("done", i < active);
+      if (i === active) item.setAttribute("aria-current", "step");
+      else item.removeAttribute("aria-current");
+    });
+  if (mode === "practice" && domain)
+    text("progress-label", `ШАГ ${active + 1} / 3 · БЕЗ ТАЙМЕРА`);
+  else if (mode === "practice" && blade)
+    text("progress-label", `ШАГ ${active + 1} / 2`);
+}
 function frame(now: number) {
   const dt = Math.max(0, now - lastFrame);
   lastFrame = now;
@@ -881,6 +954,7 @@ function frame(now: number) {
             : 1,
       tear: awakening.complete ? 1 : awakening.spread,
     };
+    updateInputGuide();
     scene.draw(world, control, now);
   }
   requestAnimationFrame(frame);

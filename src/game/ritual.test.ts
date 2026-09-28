@@ -24,10 +24,10 @@ function prime(r: Ritual) {
     750,
   );
 }
-function draw(r: Ritual, path = circle()) {
+function draw(r: Ritual, path = circle(), allowed: string | null = null) {
   for (const p of path)
-    r.update(input({ pinching: true, position: p }), 40, 100);
-  r.update(open, 40, 100);
+    r.update(input({ pinching: true, position: p }), 40, 100, allowed);
+  r.update(open, 40, 100, allowed);
 }
 describe("spell rituals", () => {
   it("requires a neutral open palm before compression, so the tutorial fist cannot cast", () => {
@@ -125,8 +125,37 @@ describe("spell rituals", () => {
     for (const p of circle().slice(0, 20))
       r.update(input({ pinching: true, position: p }), 40, 100);
     r.update(emptyControl(), 50, 100);
-    expect(r.stage).toBe("idle");
+    expect(r.stage).toBe("draw");
+    expect(r.path).toHaveLength(0);
     expect(r.update(open, 50, 100).domain).toBeUndefined();
+    draw(r);
+    expect(r.stage).toBe("release");
+  });
+  it("keeps a completed circle on pause but requires a fresh two-hand release", () => {
+    const r = new Ritual();
+    prime(r);
+    draw(r);
+    hold(r, input({ open: true, secondOpen: true, handGap: 0.4 }), 200);
+    r.update(emptyControl(), 50, 100);
+    expect(r.stage).toBe("release");
+    expect(r.circle?.ok).toBe(true);
+    expect(r.releaseHold).toBe(0);
+    expect(
+      r.update(input({ open: true, secondOpen: true, handGap: 0.4 }), 200, 100)
+        .domain,
+    ).toBeUndefined();
+    expect(
+      r.update(input({ open: true, secondOpen: true, handGap: 0.4 }), 200, 100)
+        .domain,
+    ).toBe(true);
+  });
+  it("lets a novice take their time drawing during the territory lesson", () => {
+    const r = new Ritual();
+    prime(r);
+    for (let t = 0; t < 24000; t += 50) r.update(open, 50, 100, "domain");
+    expect(r.stage).toBe("draw");
+    draw(r, circle(), "domain");
+    expect(r.stage).toBe("release");
   });
   it("expires unfinished rituals without spending energy", () => {
     const r = new Ritual();

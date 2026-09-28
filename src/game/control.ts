@@ -20,6 +20,8 @@ export type Control = {
   bladeSign: boolean;
   twoHands: boolean;
   secondOpen: boolean;
+  secondSign: boolean;
+  secondQuality: string | null;
   dualSign: boolean;
   handGap: number;
   secondPosition: Point | null;
@@ -40,6 +42,8 @@ export const emptyControl = (): Control => ({
   bladeSign: false,
   twoHands: false,
   secondOpen: false,
+  secondSign: false,
+  secondQuality: null,
   dualSign: false,
   handGap: 0,
   secondPosition: null,
@@ -161,6 +165,8 @@ export class MotionControl {
       bladeSign: !!hand.bladeSign,
       twoHands,
       secondOpen: twoHands && !!second?.open,
+      secondSign: twoHands && !!second?.bladeSign,
+      secondQuality: second?.quality ?? null,
       dualSign:
         twoHands &&
         !!hand.bladeSign &&

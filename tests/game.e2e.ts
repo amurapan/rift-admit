@@ -295,3 +295,50 @@ test("help pauses combat; calibration, sound and fullscreen fallback remain usab
   await expect(page.locator("#sound")).toHaveAttribute("aria-pressed", "false");
   expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
 });
+
+test("territory guide shows both hands, survives tracking loss and teaches the circle one step at a time", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.locator("#help").click();
+  await page
+    .getByRole("button", { name: "Тренировать круг / территорию" })
+    .click();
+  await prepare(page);
+  await gesture(page, "open");
+  await expect(page.locator("#hint")).toContainText("ОБЕ руки");
+  await expect(page.locator("#second-hand-state")).toContainText("не видна");
+  await palms(page);
+  await expect(page.locator("#second-hand-state")).toContainText(
+    "ладонь раскрыта",
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
+    .toBe("draw");
+  await expect(
+    page.locator('#ritual-steps [aria-current="step"]'),
+  ).toContainText("Круг щипком");
+  await page.screenshot({ path: "test-results/two-hand-guide.png" });
+  await gesture(page, "pinch", { x: 0.73, y: 0.52 }, { circle: 1 });
+  await page.waitForTimeout(850);
+  await gesture(page, "none");
+  await page.waitForTimeout(200);
+  await gesture(page, "open");
+  await expect(page.locator("#hint")).toContainText("Первая печать сохранена");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
+    .toBe("draw");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await contained(page, "#feedback");
+  await page.screenshot({ path: "test-results/circle-guide-mobile.png" });
+  await drawCircle(page);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
+    .toBe("release");
+  await expect(page.locator("#hint")).toContainText("ОБЕ руки");
+  await palms(page, true);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stats.domains))
+    .toBe(1);
+  await expect(page.locator("#result")).toBeVisible();
+});

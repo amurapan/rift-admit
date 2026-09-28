@@ -154,6 +154,24 @@ export class Ritual {
     this.progress = 0;
     this.label = "";
   }
+  pause() {
+    const stage = this.stage,
+      circle = this.circle,
+      path = this.path,
+      elapsed = this.ritualMs;
+    this.reset();
+    this.stage = stage;
+    this.ritualMs = elapsed;
+    if (stage === "release") {
+      this.circle = circle;
+      this.path = path;
+    }
+    if (stage === "draw") {
+      this.hint =
+        "Рука пропала из кадра. Первая печать сохранена — начни круг заново щипком.";
+      this.errorMs = 3000;
+    }
+  }
   update(
     input: Control,
     dt: number,
@@ -162,7 +180,7 @@ export class Ritual {
   ): MagicAction {
     const action: MagicAction = {};
     if (!input.valid) {
-      this.reset();
+      this.pause();
       return action;
     }
     this.cooldown = Math.max(0, this.cooldown - dt);
@@ -178,6 +196,15 @@ export class Ritual {
       !this.vortex &&
       this.stage === "idle"
     ) {
+      this.label = "1 / 3 · ДВЕ ОТКРЫТЫЕ ЛАДОНИ";
+      if (!this.errorMs)
+        this.hint = !input.twoHands
+          ? "Покажи ОБЕ руки: на экране должны быть курсоры ① и ②."
+          : !input.open || !input.secondOpen
+            ? "Раскрой все пальцы на ОБЕИХ руках. Здесь нужны ладони, а не знак ✌."
+            : input.handGap >= 0.19
+              ? "Сблизь курсоры ① и ②. Держи ладони рядом, не накладывая их друг на друга."
+              : "Верно — удержи обе ладони рядом до заполнения полоски.";
       this.domainHold = input.domainPose ? this.domainHold + dt : 0;
       if (this.domainHold > 0) {
         this.label = "ТЕРРИТОРИЯ · ПЕРВАЯ ПЕЧАТЬ";
@@ -194,7 +221,7 @@ export class Ritual {
     } else if (this.stage === "idle") this.domainHold = 0;
     if (this.stage !== "idle") {
       this.ritualMs += dt;
-      if (this.ritualMs > 18000) {
+      if (allowed !== "domain" && this.ritualMs > 18000) {
         this.reset();
         this.hint = "Ритуал рассеялся. Сблизь открытые ладони и начни снова.";
         this.errorMs = 2500;
@@ -203,7 +230,11 @@ export class Ritual {
       if (this.stage === "draw") {
         this.label = "ТЕРРИТОРИЯ · НАРИСУЙ КРУГ";
         if (!this.errorMs)
-          this.hint = "Щипок — рисовать. Обведи круг и разомкни пальцы.";
+          this.hint = input.fist
+            ? "Для щипка соедини большой и указательный. Остальные три пальца оставь выпрямленными."
+            : this.drawing
+              ? "Веди курсор ① по кругу, удерживая щипок. Вернись к началу и разомкни пальцы."
+              : "Рисует рука ①. Соедини БОЛЬШОЙ и УКАЗАТЕЛЬНЫЙ пальцы и обведи пунктир кистью. Вторую руку можно опустить.";
         if (input.pinching && !this.lastPinch) {
           this.path = [];
           this.drawing = true;
@@ -240,7 +271,11 @@ export class Ritual {
         this.progress = clamp(this.path.length / 65);
       } else {
         this.label = "ТЕРРИТОРИЯ · РАСКРОЙ ПРОСТРАНСТВО";
-        this.hint = "Раскрой обе ладони и разведи их в стороны.";
+        this.hint = !input.twoHands
+          ? "Круг готов. Теперь покажи ОБЕ руки — нужны два курсора."
+          : !input.open || !input.secondOpen
+            ? "Круг готов. Раскрой все пальцы ОБЕИХ ладоней."
+            : "Разводи курсоры ① и ② в стороны и удержи ладони открытыми.";
         this.releaseHold =
           input.open && input.secondOpen && (input.handGap ?? 0) > 0.3
             ? this.releaseHold + dt
@@ -312,9 +347,16 @@ export class Ritual {
           ? this.bladeHold + dt
           : 0;
       if (this.bladeHold >= 300 && !this.bladeMs) {
-        this.bladeMs = 2600;
+        this.bladeMs = 5000;
         action.cue = "armed";
         this.strokeId = undefined;
+      }
+      if (allowed === "swipe" && !this.bladeMs && !this.errorMs) {
+        this.label = "1 / 2 · ПЕЧАТЬ ДВУХ ПАЛЬЦЕВ";
+        this.progress = this.bladeHold / 300;
+        this.hint = input.bladeSign
+          ? "Поза верная. На мгновение останови кисть."
+          : "На руке ① подними УКАЗАТЕЛЬНЫЙ и СРЕДНИЙ (✌). Безымянный и мизинец согни. Щипок здесь не нужен.";
       }
       if (this.bladeMs > 0) {
         this.label = "РАЗРЕЗ · ПЕЧАТЬ ПРИНЯТА";
