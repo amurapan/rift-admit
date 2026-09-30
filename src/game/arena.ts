@@ -183,6 +183,18 @@ export class Arena {
       (this.phase === 2 && (this.elapsed - 65000) % 9000 > 4200)
     );
   }
+  get attackWindowMs() {
+    if (this.practice || this.ended || this.phase !== 2) return 0;
+    const cycle = (this.elapsed - 65000) % 9000;
+    let remaining = Math.max(this.domainMs, this.staggerMs);
+    if (cycle > 4200) remaining = Math.max(remaining, 9000 - cycle);
+    // If territory or a reflected ray bridges into the next opening, the
+    // vulnerability continues without a gap. Include that whole interval.
+    const nextOpening = cycle <= 4200 ? 4200 - cycle : 13200 - cycle;
+    if (remaining > nextOpening)
+      remaining = Math.max(remaining, nextOpening + 4800);
+    return remaining;
+  }
   private random() {
     this.randomState =
       (Math.imul(1664525, this.randomState) + 1013904223) >>> 0;
@@ -647,13 +659,22 @@ export class Arena {
           );
         }
       }
-    if (this.exposed && segmentDistance(BOSS, slash.from, slash.to) < 0.11) {
+    const bossContact =
+      !this.practice && segmentDistance(BOSS, slash.from, slash.to) < 0.11;
+    if (this.exposed && bossContact) {
       this.bossDamage(this.domainMs ? 26 : 16);
       this.reward("swipe", 90);
       hits++;
     }
     if (hits) this.stats.cutHits++;
-    else {
+    else if (bossContact) {
+      this.effect("block", BOSS, "ЗАЩИТА БОССА");
+      this.coach(
+        this.phase === 2
+          ? "Глаз закрыт. Отрази луч ладонью или дождись открытия после залпа, затем нанеси разрез."
+          : "Босса пока закрывает завеса. Защищай ядро и уничтожай снаряды до пробуждения.",
+      );
+    } else {
       this.stats.offTargetCuts++;
       this.coach("Разрез прошёл мимо. Направь светящуюся линию через цель.");
     }
@@ -682,8 +703,9 @@ export class Arena {
     this.entities = this.entities.filter((o) => o.id !== e.id);
   }
   private bossDamage(amount: number) {
+    const dealt = Math.min(this.bossHp, amount);
     if (!this.practice) this.bossHp = Math.max(0, this.bossHp - amount);
-    this.effect("boss", BOSS);
+    this.effect("boss", BOSS, this.practice ? undefined : `−${dealt}`);
     if (!this.practice && this.bossHp <= 0) this.finish(true);
   }
   private finish(won: boolean) {

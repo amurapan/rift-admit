@@ -758,6 +758,11 @@ function updateHud(now: number) {
       ],
     );
     text("boss-name", world.phase === 2 ? "НАБЛЮДАТЕЛЬ" : "ЗАВЕСА");
+    const attackWindow = world.attackWindowMs;
+    el("battle-hud").classList.toggle(
+      "boss-exposed",
+      attackWindow > 0 && world.beam?.stage !== "charging",
+    );
     text(
       "boss-state",
       world.beam?.stage === "charging"
@@ -765,8 +770,8 @@ function updateHud(now: number) {
         : world.beam?.stage === "reflected"
           ? "ЛУЧ ВОЗВРАЩЁН"
           : world.phase === 2
-            ? world.exposed
-              ? "ГЛАЗ ОТКРЫТ — АТАКУЙ"
+            ? attackWindow > 0
+              ? `АТАКУЙ ГЛАЗ · ${(attackWindow / 1000).toFixed(1)} С`
               : "ГОТОВИТ ЗАЛП"
             : `ДО ПРОБУЖДЕНИЯ · ${Math.ceil(Math.max(0, 65000 - world.elapsed) / 1000)} С`,
     );
@@ -1023,6 +1028,7 @@ function frame(now: number) {
             ? "Отклик рук: ждём кадр камеры…"
             : "Отклик рук: камера выключена",
       );
+      text("detector-details", model ? (stats?.reason ?? "") : "");
     }
     drawHandOverlay(now);
     scene.draw(world, cursors.draw(control, now), now);

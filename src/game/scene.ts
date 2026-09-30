@@ -556,6 +556,27 @@ export class Scene {
     }
     c.restore();
     if (world) {
+      if (world.attackWindowMs > 0 && world.beam?.stage !== "charging") {
+        // A fixed target around the actual hit area; no extra particles or
+        // camera movement, so the opening remains easy to aim at.
+        const radius = fieldW * 0.11;
+        c.save();
+        c.strokeStyle = "#a5ffe0";
+        c.lineWidth = 2;
+        for (const x of [-1, 1])
+          for (const y of [-1, 1]) {
+            c.beginPath();
+            c.moveTo(boss.x + x * radius, boss.y + y * radius * 0.45);
+            c.lineTo(boss.x + x * radius, boss.y + y * radius * 0.7);
+            c.lineTo(boss.x + x * radius * 0.7, boss.y + y * radius * 0.7);
+            c.stroke();
+          }
+        c.font = "600 11px Manrope,sans-serif";
+        c.textAlign = "center";
+        c.fillStyle = "#c6ffe9";
+        c.fillText("РАССЕКИ ГЛАЗ", boss.x, boss.y + radius + 18);
+        c.restore();
+      }
       if (!world.ended) this.drawBeam(world, to, fieldW, t);
       this.halo(core.x, core.y, fieldW * 0.11, "#73e4c52b");
       this.seal(core.x, core.y, fieldW * 0.05, t * 0.2, "#9ff4df");
@@ -858,10 +879,17 @@ export class Scene {
         }
       }
       if (f.text && !["domain", "phase"].includes(f.type)) {
-        c.font = "600 11px Manrope,sans-serif";
+        const damage = f.type === "boss" && f.text.startsWith("−");
+        c.font = damage
+          ? "700 24px Manrope,sans-serif"
+          : "600 11px Manrope,sans-serif";
         c.textAlign = "center";
-        c.fillStyle = "#eee0ff";
-        c.fillText(f.text, p.x, p.y - 25 - f.age * 25);
+        c.fillStyle = damage ? "#c6ffe9" : "#eee0ff";
+        c.fillText(
+          f.text,
+          p.x + (damage ? fieldW * 0.14 : 0),
+          p.y - 25 - f.age * 25,
+        );
       }
       c.restore();
     }

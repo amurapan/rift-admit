@@ -26,6 +26,67 @@ function cut(a: Arena, y = 0.5, id = 1) {
   advance(a, 350);
 }
 describe("spatial spell combat", () => {
+  it("explains a cut blocked by the boss without calling it an off-target cut", () => {
+    const a = battle();
+    // Keep the path away from spawned projectiles, directly across the eye.
+    a.magic.bladeMs = 1000;
+    a.tick(
+      1,
+      input({
+        slash: {
+          from: { x: 0.45, y: BOSS.y },
+          to: { x: 0.55, y: BOSS.y },
+          id: 101,
+        },
+      }),
+    );
+    a.entities = [];
+    advance(a, 300);
+    expect(a.bossHp).toBe(240);
+    expect(a.stats.offTargetCuts).toBe(0);
+    expect(a.hint).toContain("завеса");
+    expect(a.drainEvents()).toContainEqual(
+      expect.objectContaining({ type: "block", text: "ЗАЩИТА БОССА" }),
+    );
+  });
+  it("shows actual damage, including the final hit, and ends the attack window on victory", () => {
+    const a = battle();
+    a.elapsed = 70000;
+    a.phase = 2;
+    a.bossHp = 7;
+    a.magic.bladeMs = 1000;
+    a.tick(
+      1,
+      input({
+        slash: {
+          from: { x: 0.45, y: BOSS.y },
+          to: { x: 0.55, y: BOSS.y },
+          id: 102,
+        },
+      }),
+    );
+    a.entities = [];
+    advance(a, 300);
+    expect(a.status).toBe("victory");
+    expect(a.attackWindowMs).toBe(0);
+    expect(a.drainEvents()).toContainEqual(
+      expect.objectContaining({ type: "boss", text: "−7" }),
+    );
+  });
+  it("keeps the opening countdown continuous when territory bridges a boss cycle", () => {
+    const a = battle();
+    a.phase = 2;
+    a.elapsed = 73000;
+    expect(a.attackWindowMs).toBe(1000);
+    a.domainMs = 6000;
+    expect(a.attackWindowMs).toBe(10000);
+    const remaining = a.attackWindowMs;
+    a.tick(2000, emptyControl());
+    expect(a.attackWindowMs).toBe(remaining);
+    a.domainMs = 0;
+    a.elapsed = 66000;
+    expect(a.attackWindowMs).toBe(0);
+  });
   it("draws multiple enemies into the actual vortex and releases a physical wave", () => {
     const a = new Arena("vortex");
     advance(a, 50, open);

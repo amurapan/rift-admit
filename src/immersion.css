@@ -434,6 +434,12 @@ aside {
 .boss-label {
   margin-top: 12px;
 }
+.combat-hud.boss-exposed #boss-state {
+  color: #c6ffe9;
+}
+.combat-hud.boss-exposed .boss-track > div {
+  background: #a5ffe0;
+}
 .boss-track {
   height: 2px;
 }
