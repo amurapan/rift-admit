@@ -4,6 +4,12 @@ import type { FX } from "./arena";
 export class Sound {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
+  private music: GainNode | null = null;
+  private effects: GainNode | null = null;
+  private ambience: GainNode | null = null;
+  private noiseBuffer: AudioBuffer | null = null;
+  private scene: "silent" | "training" | "battle" = "silent";
+  private duckUntil = 0;
   private nextBeat = 0;
   private beat = 0;
   private nextCharge = 0;
@@ -15,7 +21,41 @@ export class Sound {
       if (!this.master) {
         this.master = this.context.createGain();
         this.master.gain.value = this.enabled ? 0.16 : 0;
-        this.master.connect(this.context.destination);
+        const limiter = this.context.createDynamicsCompressor();
+        limiter.threshold.value = -12;
+        limiter.knee.value = 16;
+        limiter.ratio.value = 5;
+        this.master.connect(limiter);
+        limiter.connect(this.context.destination);
+        this.music = this.context.createGain();
+        this.effects = this.context.createGain();
+        this.music.gain.value = 0;
+        this.music.connect(this.master);
+        this.effects.connect(this.master);
+        // A quiet, filtered stereo echo supplies space without decoded assets.
+        this.ambience = this.context.createGain();
+        this.ambience.gain.value = 0.16;
+        const delay = this.context.createDelay(1);
+        delay.delayTime.value = 0.29;
+        const filter = this.context.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.value = 2200;
+        const pan = this.context.createStereoPanner();
+        pan.pan.value = 0.4;
+        this.ambience
+          .connect(delay)
+          .connect(filter)
+          .connect(pan)
+          .connect(this.master);
+        const noise = this.context.createBuffer(
+          1,
+          this.context.sampleRate,
+          this.context.sampleRate,
+        );
+        const samples = noise.getChannelData(0);
+        for (let i = 0; i < samples.length; i++)
+          samples[i] = Math.random() * 2 - 1;
+        this.noiseBuffer = noise;
       }
       await this.context.resume();
     } catch {
@@ -40,12 +80,13 @@ export class Sound {
     end = frequency,
     delay = 0,
     attack = 0.012,
+    music = false,
   ) {
     if (
       !this.context ||
       !this.master ||
       !this.enabled ||
-      this.voices > 22 ||
+      this.voices >= (music ? 24 : 40) ||
       this.context.state !== "running"
     )
       return;
@@ -62,7 +103,8 @@ export class Sound {
     gain.gain.exponentialRampToValueAtTime(volume, time + attack);
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
     oscillator.connect(gain);
-    gain.connect(this.master);
+    gain.connect((music ? this.music : this.effects) ?? this.master);
+    if (!music && duration > 0.35 && this.ambience) gain.connect(this.ambience);
     oscillator.start(time);
     oscillator.stop(time + duration + 0.02);
     this.voices++;
@@ -74,6 +116,23 @@ export class Sound {
   }
   effect(event: FX) {
     if (event.continuation) return;
+    if (
+      ["domain", "burst", "spear", "parry", "phase", "victory"].includes(
+        event.type,
+      )
+    )
+      this.duck(event.type === "domain" ? 3.4 : 0.85);
+    if (["burst", "beam", "domain"].includes(event.type))
+      this.noise(
+        event.type === "domain" ? 1.6 : 0.65,
+        0.4,
+        900,
+        false,
+        event.type === "domain" ? 0.5 : 0,
+      );
+    if (event.type === "slash" || event.type === "spear")
+      this.noise(0.24, 0.23, 3500);
+    if (event.type === "parry") this.noise(0.12, 0.12, 6500);
     switch (event.type) {
       case "warning":
         this.tone(110, 2.7, "sine", 0.22, 440);
@@ -163,18 +222,135 @@ export class Sound {
         break;
     }
   }
-  update(active: boolean, phase: number, domain: boolean) {
-    if (!active || !this.enabled || !this.context) {
-      this.nextBeat = 0;
+  private duck(seconds: number) {
+    if (!this.context) return;
+    this.duckUntil = Math.max(
+      this.duckUntil,
+      this.context.currentTime + seconds,
+    );
+    this.music?.gain.setTargetAtTime(0.16, this.context.currentTime, 0.025);
+  }
+  private noise(
+    duration: number,
+    volume: number,
+    frequency: number,
+    music = false,
+    delay = 0,
+  ) {
+    if (
+      !this.context ||
+      !this.noiseBuffer ||
+      !this.enabled ||
+      this.context.state !== "running" ||
+      this.voices >= 40
+    )
       return;
-    }
+    const source = this.context.createBufferSource(),
+      filter = this.context.createBiquadFilter(),
+      gain = this.context.createGain();
+    const time = this.context.currentTime + delay;
+    source.buffer = this.noiseBuffer;
+    source.loop = true;
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(frequency, time);
+    filter.frequency.exponentialRampToValueAtTime(
+      Math.max(80, frequency / 4),
+      time + duration,
+    );
+    filter.Q.value = 0.7;
+    gain.gain.setValueAtTime(0.001, time);
+    gain.gain.exponentialRampToValueAtTime(volume, time + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+    source
+      .connect(filter)
+      .connect(gain)
+      .connect((music ? this.music : this.effects)!);
+    source.start(time);
+    source.stop(time + duration + 0.02);
+    this.voices++;
+    source.onended = () => {
+      source.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+      this.voices--;
+    };
+  }
+  discovery() {
+    this.duck(1.8);
+    this.tone(65.4, 1.4, "sine", 0.35, 49);
+    [261.6, 392, 523.2, 587.3].forEach((f, i) =>
+      this.tone(f, 1.8, "sine", 0.19, f, 0.12 + i * 0.14),
+    );
+    this.noise(1.1, 0.08, 2600);
+  }
+  update(
+    scene: "silent" | "training" | "battle",
+    phase: number,
+    domain: boolean,
+  ) {
+    if (!this.context || !this.enabled || this.context.state !== "running")
+      return;
     const now = this.context.currentTime;
-    if (now < this.nextBeat) return;
-    this.nextBeat = now + (domain ? 0.5 : 0.43 - phase * 0.06);
-    const notes = [164.8, 247, 293.7, 329.6, 247, 196, 293.7, 220];
-    this.tone(notes[this.beat % 8] * (domain ? 2 : 1), 0.5, "sine", 0.09);
-    if (this.beat % 4 === 0) this.tone(65.4, 0.8, "triangle", 0.15, 55);
-    if (phase > 0 && this.beat % 2 === 0) this.tone(130, 0.12, "sine", 0.2, 40);
+    if (scene !== this.scene) {
+      this.scene = scene;
+      this.beat = 0;
+      this.nextBeat = 0;
+    }
+    const volume =
+      scene === "silent"
+        ? 0
+        : now < this.duckUntil
+          ? 0.16
+          : scene === "training"
+            ? 0.65
+            : 0.9;
+    this.music?.gain.setTargetAtTime(
+      volume,
+      now,
+      scene === "silent" ? 0.06 : 0.2,
+    );
+    if (scene === "silent" || now < this.nextBeat) return;
+    const battle = scene === "battle";
+    // Eighth notes; no catch-up burst after a stalled frame or background tab.
+    const interval = battle ? (phase >= 2 ? 0.25 : 0.288) : 0.5;
+    this.nextBeat = now + interval;
+    const step = this.beat % 16,
+      bar = Math.floor(this.beat / 16) % 4;
+    const roots = [130.81, 103.83, 155.56, 116.54];
+    const root = roots[bar];
+    const note = (
+      f: number,
+      duration: number,
+      volume: number,
+      type: OscillatorType = "sine",
+      end = f,
+      attack = 0.02,
+    ) => this.tone(f, duration, type, volume, end, 0, attack, true);
+    if (step % 8 === 0) {
+      // Slow minor harmony below the arpeggio, a different inversion each bar.
+      [root, root * 1.1892, root * 1.4983].forEach((f) =>
+        note(f, interval * 9, battle ? 0.075 : 0.11, "triangle", f, 0.35),
+      );
+    }
+    const melody = [0, 7, 12, 10, 7, 3, 14, 12];
+    if (!battle || step % 2 === 0 || phase >= 2)
+      note(
+        root * 2 ** (melody[step % 8] / 12) * (domain ? 2 : 1),
+        battle ? 0.45 : 1.4,
+        battle ? 0.16 : 0.12,
+      );
+    if (battle) {
+      if (step % 4 === 0 || (phase >= 2 && step === 14)) {
+        note(145, 0.24, 0.8, "sine", 35);
+        note(root / 2, 0.65, 0.26, "triangle");
+      }
+      if (step % 8 === 4) {
+        this.noise(0.18, 0.3, 2100, true);
+        note(175, 0.1, 0.15, "triangle", 80);
+      }
+      if (phase > 0 || step % 2 === 0)
+        this.noise(0.055, step % 2 ? 0.06 : 0.1, 8000, true);
+    }
     this.beat++;
   }
   charge(power: number) {

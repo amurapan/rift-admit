@@ -107,6 +107,13 @@ async function prepare(page: Page) {
   await gesture(page, "rest");
   await expect(page.locator("#lesson-demo")).toBeHidden();
 }
+async function acceptMastery(page: Page) {
+  await expect(page.locator("#mastery")).toBeVisible({ timeout: 22000 });
+  await gesture(page, "rest");
+  await expect(page.locator("#mastery")).toHaveAttribute("data-armed", "true");
+  await gesture(page, "open");
+  await expect(page.locator("#mastery")).toBeHidden();
+}
 async function palms(page: Page, apart = false) {
   await gesture(
     page,
@@ -174,11 +181,18 @@ test("immersive awakening → four physical lessons → battle → report and re
   await page.waitForTimeout(1100);
   await page.screenshot({ path: "test-results/vortex.png" });
   await gesture(page, "open");
+  await expect(page.locator("#mastery")).toBeVisible();
+  await page.waitForTimeout(1800);
+  await expect(page.locator("#mastery")).toBeVisible();
+  await expect(page.locator("#mastery")).toHaveAttribute("data-armed", "false");
+  await page.screenshot({ path: "test-results/mastery-desktop.png" });
+  await acceptMastery(page);
   await expect(page.locator("#lesson-title")).toHaveText("Отрази его силу.");
   await page.waitForTimeout(700);
   await expect(page.locator("#lesson-demo")).toBeVisible();
   await prepare(page);
   await gesture(page, "open", { x: 0.6, y: 0.64 });
+  await acceptMastery(page);
   await expect(page.locator("#lesson-title")).toHaveText(
     "Оставь трещину в реальности.",
     { timeout: 9000 },
@@ -194,6 +208,7 @@ test("immersive awakening → four physical lessons → battle → report and re
   await gesture(page, "sign", { x: 0.2, y: 0.5 });
   await page.waitForTimeout(600);
   await gesture(page, "sign", { x: 0.2, y: 0.5 }, { to: { x: 0.8, y: 0.5 } });
+  await acceptMastery(page);
   await expect(page.locator("#lesson-title")).toHaveText(
     "Раскрой свою территорию.",
   );
@@ -210,6 +225,7 @@ test("immersive awakening → four physical lessons → battle → report and re
     .poll(() => page.evaluate(() => (window as any).__snapshot.stats.domains))
     .toBe(1);
   await page.screenshot({ path: "test-results/territory.png" });
+  await acceptMastery(page);
   await expect(page.locator("#result")).toBeVisible();
   await gesture(page, "none");
   await expect(page.locator("#restart-hint")).toContainText("Удерживай");
@@ -245,6 +261,13 @@ test("immersive awakening → four physical lessons → battle → report and re
     ),
   ).toBe(true);
   await gesture(page, "rest");
+  for (let i = 0; i < 2; i++) {
+    await expect(page.locator("#mastery")).toBeVisible({ timeout: 22000 });
+    await contained(page, ".mastery-card");
+    await page.screenshot({ path: `test-results/mastery-mobile-${i}.png` });
+    await acceptMastery(page);
+    await gesture(page, "rest");
+  }
   await expect(page.locator("#result")).toBeVisible({ timeout: 85000 });
   await expect(page.locator("#advice-detail")).not.toBeEmpty();
   await page.screenshot({ path: "test-results/report-mobile.png" });
@@ -370,6 +393,7 @@ test("territory teaches a two-hand sign, rejects wrong pose and survives trackin
     .poll(() => page.evaluate(() => (window as any).__snapshot.stats.domains))
     .toBe(1);
   await page.screenshot({ path: "test-results/domain-release-mobile.png" });
+  await acceptMastery(page);
   await expect(page.locator("#result")).toBeVisible();
 });
 
@@ -406,6 +430,19 @@ test("new techniques unlock in a short battle and hands can rest without pausing
   await setup(page);
   await page.locator("#skip-training").click();
   await gesture(page, "spear", { x: 0.5, y: 0.3 });
+  await expect(page.locator("#mastery")).toBeVisible({ timeout: 22000 });
+  const frozenAt = await page.evaluate(
+    () => (window as any).__snapshot.elapsed,
+  );
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(() => (window as any).__snapshot.elapsed)).toBe(
+    frozenAt,
+  );
+  expect(
+    await page.evaluate(() => (window as any).__snapshot.stats.spears),
+  ).toBe(0);
+  await acceptMastery(page);
+  await gesture(page, "spear", { x: 0.5, y: 0.3 });
   await expect
     .poll(() => page.evaluate(() => (window as any).__snapshot.stats.spears), {
       timeout: 20000,
@@ -421,6 +458,13 @@ test("new techniques unlock in a short battle and hands can rest without pausing
   await page.screenshot({ path: "test-results/rest.png" });
   await expect(page.locator("#rest-panel")).toBeHidden({ timeout: 6000 });
   await expect(page.locator("#time-left")).toHaveText(time!);
+  await gesture(
+    page,
+    "open",
+    { x: 0.35, y: 0.5 },
+    { second: { gesture: "rest", point: { x: 0.65, y: 0.5 } } },
+  );
+  await acceptMastery(page);
   await gesture(
     page,
     "open",
@@ -537,4 +581,79 @@ test("boss ray explains errors and a held palm returns the attack", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await contained(page, "#feedback");
   await page.locator("#stop").click();
+});
+
+test("audio produces distinct music scenes, ducks effects and respects mute and suspension", async ({
+  page,
+}) => {
+  await setup(page);
+  const levels = await page.evaluate(async () => {
+    const { Sound } = await import("/src/game/audio.ts");
+    const sound = new Sound();
+    await sound.unlock();
+    const internal = sound as any;
+    const context = internal.context as AudioContext;
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 2048;
+    internal.master.connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
+    const wait = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
+    const rms = () => {
+      analyser.getFloatTimeDomainData(samples);
+      return Math.sqrt(
+        samples.reduce((sum, v) => sum + v * v, 0) / samples.length,
+      );
+    };
+    sound.update("training", 0, false);
+    await wait(500);
+    const training = rms();
+    sound.update("silent", 0, false);
+    await wait(600);
+    const paused = rms();
+    sound.update("battle", 2, false);
+    await wait(160);
+    const battle = rms();
+    sound.effect({ type: "domain", position: { x: 0.5, y: 0.5 } });
+    await wait(200);
+    const ducked = internal.music.gain.value;
+    await wait(450);
+    const impact = rms();
+    sound.toggle();
+    await wait(650);
+    const muted = rms();
+    sound.toggle();
+    await wait(80);
+    sound.discovery();
+    await wait(300);
+    const restored = rms();
+    sound.suspend();
+    await wait(100);
+    const state = context.state;
+    const voices = internal.voices;
+    sound.update("battle", 2, false);
+    sound.discovery();
+    const addedWhileSuspended = internal.voices - voices;
+    await context.close();
+    return {
+      training,
+      paused,
+      battle,
+      ducked,
+      impact,
+      muted,
+      restored,
+      state,
+      addedWhileSuspended,
+    };
+  });
+  expect(levels.training).toBeGreaterThan(0.0001);
+  expect(levels.paused).toBeLessThan(levels.training * 0.05);
+  expect(levels.battle).toBeGreaterThan(0.0001);
+  expect(levels.ducked).toBeLessThan(0.2);
+  expect(levels.impact).toBeGreaterThan(0.0001);
+  expect(levels.muted).toBeLessThan(0.00001);
+  expect(levels.restored).toBeGreaterThan(0.0001);
+  expect(levels.state).toBe("suspended");
+  expect(levels.addedWhileSuspended).toBe(0);
 });

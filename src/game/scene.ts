@@ -1045,7 +1045,7 @@ export class Scene {
         c.textBaseline = "middle";
         c.fillText(
           !bothSigned
-            ? "✌ НА КАЖДОЙ РУКЕ"
+            ? "ДВА ПАЛЬЦА НА КАЖДОЙ РУКЕ"
             : near
               ? "ВЕРНО · УДЕРЖИ ПЕЧАТЬ"
               : "КИСТИ РЯДОМ · БЕЗ ПЕРЕКРЫТИЯ",
