@@ -10,6 +10,7 @@ export type Detection = {
   height: number;
   inferenceMs: number;
   delegate: string;
+  delegateReason?: string;
 };
 
 /** One transferable camera frame at a time. No queued frames and no inference on the UI thread. */
@@ -17,8 +18,13 @@ export class HandDetector {
   private worker: Worker;
   private busy = false;
   private timings: { at: number; age: number }[] = [];
-  stats: { hz: number; latency: number; at: number; delegate: string } | null =
-    null;
+  stats: {
+    hz: number;
+    latency: number;
+    at: number;
+    delegate: string;
+    reason: string;
+  } | null = null;
   private closed = false;
   private epoch = 0;
   private video: HTMLVideoElement | null = null;
@@ -91,6 +97,7 @@ export class HandDetector {
             ),
             at,
             delegate: data.delegate,
+            reason: data.delegateReason ?? "",
           };
           clearTimeout(this.timer);
           this.busy = false;

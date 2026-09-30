@@ -2,6 +2,8 @@
 let detector = null;
 let files, options;
 let delegate = "GPU";
+let delegateReason = "Обработка на GPU через WebGL 2";
+let processedFrames = 0;
 let slowFrames = 0;
 let busy = false;
 let numHands = 2;
@@ -19,8 +21,12 @@ self.onmessage = async ({ data }) => {
       const renderer = debug
         ? probe.getParameter(debug.UNMASKED_RENDERER_WEBGL)
         : "";
-      if (!probe || /swiftshader|llvmpipe|lavapipe|software/i.test(renderer))
+      if (!probe || /swiftshader|llvmpipe|lavapipe|software/i.test(renderer)) {
         delegate = "CPU";
+        delegateReason = !probe
+          ? "WebGL 2 недоступен — обработка на процессоре"
+          : "Браузер использует программный WebGL — обработка на процессоре";
+      }
       probe?.getExtension("WEBGL_lose_context")?.loseContext();
       options = {
         baseOptions: {
@@ -41,6 +47,8 @@ self.onmessage = async ({ data }) => {
         );
       } catch {
         delegate = "CPU";
+        delegateReason =
+          "Не удалось запустить модель на GPU — обработка на процессоре";
         detector = await Vision.HandLandmarker.createFromOptions(files, {
           ...options,
           baseOptions: { ...options.baseOptions, delegate },
@@ -71,16 +79,23 @@ self.onmessage = async ({ data }) => {
       numHands = data.numHands;
       options.numHands = numHands;
       await detector.setOptions({ numHands });
+      processedFrames = 0;
+      slowFrames = 0;
     }
     const start = performance.now();
     const result = detector.detectForVideo(bitmap, timestamp);
     const inferenceMs = performance.now() - start;
     // Software WebGL can be much slower than WASM. Switch once rather than
     // letting a nominal GPU backend make every cursor update take half a second.
-    slowFrames = inferenceMs > 100 ? slowFrames + 1 : 0;
+    processedFrames++;
+    // Initial GPU frames include shader compilation; do not mistake that
+    // one-time warmup for the steady-state performance of the GPU.
+    slowFrames = processedFrames > 8 && inferenceMs > 100 ? slowFrames + 1 : 0;
     if (delegate === "GPU" && slowFrames >= 3) {
       detector.close();
       delegate = "CPU";
+      delegateReason =
+        "После прогрева GPU обрабатывал кадры дольше 100 мс — выбран процессор";
       detector = await Vision.HandLandmarker.createFromOptions(files, {
         ...options,
         baseOptions: { ...options.baseOptions, delegate },
@@ -94,6 +109,7 @@ self.onmessage = async ({ data }) => {
       height,
       inferenceMs,
       delegate,
+      delegateReason,
       numHands,
       landmarks: result.landmarks,
       sides: (result.handedness ?? []).map((categories) =>
