@@ -6,6 +6,7 @@ export type Hand = {
   extended: number;
   open: boolean;
   bladeSign?: boolean;
+  spearSign?: boolean;
   quality: string | null;
 };
 
@@ -59,6 +60,13 @@ export function describeHand(points: Point[], aspect = 4 / 3): Hand | null {
       y: (points[4].y + points[8].y) / 2,
     },
     bladeSign: fingers[0] && fingers[1] && !fingers[2] && !fingers[3],
+    spearSign:
+      fingers[0] &&
+      !fingers[1] &&
+      !fingers[2] &&
+      !fingers[3] &&
+      thumbOpen &&
+      pinchRatio > 0.5,
     pinchRatio,
     extended,
     open: extended === 4 && thumbOpen && pinchRatio > 0.5,

@@ -95,12 +95,35 @@ it("accepts comfortably separated palms using the calibrated cursor distance", (
     DEFAULT_CALIBRATION,
     { minX: 0.1, maxX: 0.9, minY: 0.1, maxY: 0.9 },
   ]) {
-    const rawX = (x: number) => calibration.minX + x * (calibration.maxX - calibration.minX);
-    expect(motion.update(hand(rawX(0.27)), hand(rawX(0.73)), 100, calibration).domainPose).toBe(true);
-    expect(motion.update(hand(rawX(0.15)), hand(rawX(0.85)), 200, calibration).domainPose).toBe(false);
-    expect(motion.update(hand(rawX(0.27)), hand(rawX(0.73), 0.5, { open: false }), 300, calibration).domainPose).toBe(false);
-    expect(motion.update(hand(rawX(0.27)), hand(rawX(0.73), 0.5, { quality: "clipped" }), 400, calibration).domainPose).toBe(false);
-    expect(motion.update(hand(rawX(0.27)), null, 500, calibration).domainPose).toBe(false);
+    const rawX = (x: number) =>
+      calibration.minX + x * (calibration.maxX - calibration.minX);
+    expect(
+      motion.update(hand(rawX(0.27)), hand(rawX(0.73)), 100, calibration)
+        .domainPose,
+    ).toBe(true);
+    expect(
+      motion.update(hand(rawX(0.15)), hand(rawX(0.85)), 200, calibration)
+        .domainPose,
+    ).toBe(false);
+    expect(
+      motion.update(
+        hand(rawX(0.27)),
+        hand(rawX(0.73), 0.5, { open: false }),
+        300,
+        calibration,
+      ).domainPose,
+    ).toBe(false);
+    expect(
+      motion.update(
+        hand(rawX(0.27)),
+        hand(rawX(0.73), 0.5, { quality: "clipped" }),
+        400,
+        calibration,
+      ).domainPose,
+    ).toBe(false);
+    expect(
+      motion.update(hand(rawX(0.27)), null, 500, calibration).domainPose,
+    ).toBe(false);
   }
 });
 it("calibrates to comfortable motion and requires both horizontal and vertical coverage", () => {
@@ -115,4 +138,32 @@ it("calibrates to comfortable motion and requires both horizontal and vertical c
   const center = mapped({ x: 0.5, y: 0.5 }, bounds);
   expect(center.x).toBeCloseTo(0.5);
   expect(center.y).toBeCloseTo(0.5);
+});
+
+it("accepts separated fist-and-palm bindings with either casting hand and rejects clipped partners", () => {
+  const motion = new MotionControl();
+  const palm = hand(0.4),
+    fist = hand(0.6, 0.5, { open: false, extended: 0 });
+  expect(motion.update(palm, fist, 100, DEFAULT_CALIBRATION).bindPose).toBe(
+    true,
+  );
+  expect(motion.update(fist, palm, 200, DEFAULT_CALIBRATION).bindPose).toBe(
+    true,
+  );
+  expect(
+    motion.update(
+      palm,
+      { ...fist, quality: "clipped" },
+      300,
+      DEFAULT_CALIBRATION,
+    ).bindPose,
+  ).toBe(false);
+  expect(
+    motion.update(
+      palm,
+      hand(0.41, 0.5, { open: false, extended: 0 }),
+      400,
+      DEFAULT_CALIBRATION,
+    ).bindPose,
+  ).toBe(false);
 });

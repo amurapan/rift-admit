@@ -13,13 +13,12 @@ HandLandmarker:{createFromOptions:async()=>({close(){},async setOptions(){},dete
   for(const x of [.35,.42,.5,.58])for(const y of [.52,.4,.3,.2])p.push({x,y});
   p=p.map(v=>({x:.5+(v.x-.5)*.6,y:.5+(v.y-.5)*.6,z:0}));
   if(pose==='pinch')p[4]={x:p[8].x+.012,y:p[8].y+.004,z:0};
-  if(pose==='rest'||pose==='sign')for(const i of (pose==='sign'?[13,17]:[5,9,13,17]))p[i+3]={...p[i],y:p[i].y+.04};
+  if(pose==='rest'||pose==='sign'||pose==='spear')for(const i of (pose==='spear'?[9,13,17]:pose==='sign'?[13,17]:[5,9,13,17]))p[i+3]={...p[i],y:p[i].y+.04};
   const dx=.5225-(.2+point.x*.6),dy=.23+point.y*.54-.554;
   return p.map(v=>({...v,x:v.x+dx,y:v.y+dy}));
  }
  let point={...s.point};
  if(s.to){const f=Math.min(1,(now-s.since)/300);point={x:s.point.x+(s.to.x-s.point.x)*f,y:s.point.y+(s.to.y-s.point.y)*f};}
- if(s.circle){const a=Math.min(1,(now-s.since)/2700)*Math.PI*2*s.circle;point={x:.5+Math.cos(a)*.23,y:.52+Math.sin(a)*.23/.7};}
  return {landmarks:[hand(s.gesture,point),s.second?hand(s.second.gesture,s.second.point):null].filter(Boolean)};
 }})}};`;
 async function gesture(
@@ -79,7 +78,7 @@ async function observeDetector(page: Page) {
     };
   });
 }
-async function setup(page: Page, inferenceDelay = 0) {
+async function setup(page: Page, inferenceDelay = 0, showPreparation = false) {
   await observeDetector(page);
   await page.route("**/mediapipe/vision_bundle.js", (route) =>
     route.fulfill({
@@ -93,7 +92,11 @@ async function setup(page: Page, inferenceDelay = 0) {
   await observer(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Войти в разлом" }).click();
-  await expect(page.locator("#awakening")).toBeVisible();
+  await expect(page.locator("#preparation")).toBeVisible();
+  if (!showPreparation) {
+    for (let i = 0; i < 3; i++) await page.locator("#preparation-next").click();
+    await expect(page.locator("#awakening")).toBeVisible();
+  }
 }
 async function prepare(page: Page) {
   await expect(page.locator("#lesson-demo")).toHaveAttribute(
@@ -112,10 +115,13 @@ async function palms(page: Page, apart = false) {
     { second: { gesture: "open", point: { x: apart ? 0.84 : 0.6, y: 0.5 } } },
   );
 }
-async function drawCircle(page: Page, fraction = 1) {
-  await gesture(page, "pinch", { x: 0.73, y: 0.52 }, { circle: fraction });
-  await page.waitForTimeout(2850);
-  await gesture(page, "open");
+async function signs(page: Page, apart = false) {
+  await gesture(
+    page,
+    "sign",
+    { x: apart ? 0.12 : 0.35, y: 0.5 },
+    { second: { gesture: "sign", point: { x: apart ? 0.88 : 0.65, y: 0.5 } } },
+  );
 }
 
 test("immersive awakening → four physical lessons → battle → report and repeat", async ({
@@ -189,16 +195,12 @@ test("immersive awakening → four physical lessons → battle → report and re
   await page.waitForTimeout(600);
   await gesture(page, "sign", { x: 0.2, y: 0.5 }, { to: { x: 0.8, y: 0.5 } });
   await expect(page.locator("#lesson-title")).toHaveText(
-    "Начерти свою территорию.",
+    "Раскрой свою территорию.",
   );
   await prepare(page);
   await palms(page);
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
-    .toBe("draw");
-  await drawCircle(page, 0.7);
-  await expect(page.locator("#hint")).toContainText("Соедини");
-  await drawCircle(page);
+  await expect(page.locator("#hint")).toContainText("указательный и средний");
+  await signs(page);
   await expect
     .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
     .toBe("release");
@@ -253,6 +255,7 @@ test("immersive awakening → four physical lessons → battle → report and re
   await expect(page.locator("#arena-status")).toHaveText("ЛИЧНАЯ ТРЕНИРОВКА");
   await page.reload();
   await page.getByRole("button", { name: "Войти в разлом" }).click();
+  await page.locator("#preparation-skip").click();
   await expect(page.locator("#skip-training")).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -265,7 +268,7 @@ test("real model loads, camera shuts down, permission refusal can be retried", a
   await observeDetector(page);
   await page.goto("/");
   await page.locator("#start").click();
-  await expect(page.locator("#awakening")).toBeVisible({ timeout: 60000 });
+  await expect(page.locator("#preparation")).toBeVisible({ timeout: 60000 });
   await expect
     .poll(() => page.evaluate(() => (window as any).__detectorFrames), {
       timeout: 60000,
@@ -329,68 +332,110 @@ test("help pauses combat; calibration, sound and fullscreen fallback remain usab
   expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
 });
 
-test("territory guide shows both hands, survives tracking loss and teaches the circle one step at a time", async ({
+test("territory teaches a two-hand sign, rejects wrong pose and survives tracking loss", async ({
   page,
 }) => {
   await setup(page);
   await page.locator("#help").click();
-  await page
-    .getByRole("button", { name: "Тренировать круг / территорию" })
-    .click();
+  await page.getByRole("button", { name: "Тренировать территорию" }).click();
   await prepare(page);
   await gesture(page, "open");
-  await expect(page.locator("#hint")).toContainText("ОБЕ руки");
-  await expect(page.locator("#second-hand-state")).toContainText("не видна");
-  await palms(page, true);
-  await expect(page.locator("#hint")).toContainText("до зелёной связи");
-  await page.waitForTimeout(800);
+  await expect(page.locator("#hint")).toContainText("обе кисти");
+  await palms(page);
+  await expect(page.locator("#hint")).toContainText("указательный и средний");
+  await signs(page, true);
+  await expect(page.locator("#hint")).toContainText("небольшим зазором");
   expect(await page.evaluate(() => (window as any).__snapshot.stage)).toBe(
     "idle",
   );
-  await page.screenshot({ path: "test-results/palms-distance-guide.png" });
-  // A comfortable visible gap used to fail the raw-camera distance threshold.
-  await gesture(
-    page,
-    "open",
-    { x: 0.27, y: 0.5 },
-    {
-      second: { gesture: "open", point: { x: 0.73, y: 0.5 } },
-    },
-  );
-  await expect(page.locator("#hint")).toContainText("Достаточно близко");
-  await page.screenshot({ path: "test-results/palms-accepted.png" });
-  await expect(page.locator("#second-hand-state")).toContainText(
-    "ладонь раскрыта",
-  );
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
-    .toBe("draw");
-  await expect(
-    page.locator('#ritual-steps [aria-current="step"]'),
-  ).toContainText("Круг щипком");
-  await page.screenshot({ path: "test-results/two-hand-guide.png" });
-  await gesture(page, "pinch", { x: 0.73, y: 0.52 }, { circle: 1 });
-  await page.waitForTimeout(850);
-  await gesture(page, "none");
-  await page.waitForTimeout(200);
-  await gesture(page, "open");
-  await expect(page.locator("#hint")).toContainText("Первая печать сохранена");
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
-    .toBe("draw");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await contained(page, "#feedback");
-  await page.screenshot({ path: "test-results/circle-guide-mobile.png" });
-  await drawCircle(page);
+  await signs(page);
   await expect
     .poll(() => page.evaluate(() => (window as any).__snapshot.stage))
     .toBe("release");
-  await expect(page.locator("#hint")).toContainText("ОБЕ руки");
-  await palms(page, true);
+  await expect(
+    page.locator('#ritual-steps [aria-current="step"]'),
+  ).toContainText("Раскрой обе");
+  await gesture(page, "none");
+  await page.waitForTimeout(700);
+  await gesture(page, "open");
+  await expect(page.locator("#hint")).toContainText("Верни вторую");
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await contained(page, "#feedback");
+  await page.screenshot({ path: "test-results/domain-seal-mobile.png" });
+  await palms(page);
   await expect
     .poll(() => page.evaluate(() => (window as any).__snapshot.stats.domains))
     .toBe(1);
+  await page.screenshot({ path: "test-results/domain-release-mobile.png" });
   await expect(page.locator("#result")).toBeVisible();
+});
+
+test("preparation cards require fresh gestures and support mobile and keyboard fallback", async ({
+  page,
+}) => {
+  await setup(page, 0, true);
+  await page.screenshot({ path: "test-results/preparation-desktop.png" });
+  await gesture(page, "open");
+  await expect(page.locator("#preparation")).toHaveAttribute("data-step", "1");
+  await page.waitForTimeout(1600);
+  await expect(page.locator("#preparation")).toHaveAttribute("data-step", "1");
+  await gesture(page, "rest");
+  await page.waitForTimeout(350);
+  await gesture(page, "open");
+  await expect(page.locator("#preparation")).toHaveAttribute("data-step", "2");
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await contained(page, ".preparation-card");
+  await contained(page, "#preparation-next");
+  await page.screenshot({ path: "test-results/preparation-mobile.png" });
+  await page.locator("#preparation-next").click();
+  await expect(page.locator("#awakening")).toBeVisible();
+});
+
+test("new techniques unlock in a short battle and hands can rest without pausing the break", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("rift.ritual.trained", "yes"),
+  );
+  await setup(page);
+  await page.locator("#skip-training").click();
+  await gesture(page, "spear", { x: 0.5, y: 0.3 });
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stats.spears), {
+      timeout: 20000,
+    })
+    .toBe(1);
+  await page.waitForTimeout(3800);
+  expect(
+    await page.evaluate(() => (window as any).__snapshot.stats.spears),
+  ).toBe(1);
+  await expect(page.locator("#rest-panel")).toBeVisible({ timeout: 9000 });
+  await gesture(page, "none");
+  const time = await page.locator("#time-left").textContent();
+  await page.screenshot({ path: "test-results/rest.png" });
+  await expect(page.locator("#rest-panel")).toBeHidden({ timeout: 6000 });
+  await expect(page.locator("#time-left")).toHaveText(time!);
+  await gesture(
+    page,
+    "open",
+    { x: 0.35, y: 0.5 },
+    { second: { gesture: "rest", point: { x: 0.65, y: 0.5 } } },
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.stats.binds), {
+      timeout: 11000,
+    })
+    .toBe(1);
+  await page.screenshot({ path: "test-results/bind.png" });
+  await page.locator("#help").click();
+  await expect(page.locator('[data-extra="bind"]')).toHaveClass(/unlocked/);
+  await page.screenshot({ path: "test-results/spellbook.png" });
 });
 
 test("slow inference stays in the worker while the interface keeps drawing", async ({

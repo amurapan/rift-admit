@@ -24,6 +24,9 @@ export type Control = {
   open: boolean;
   fist: boolean;
   bladeSign: boolean;
+  spearSign: boolean;
+  bindPose: boolean;
+  secondFist: boolean;
   twoHands: boolean;
   secondOpen: boolean;
   secondSign: boolean;
@@ -46,6 +49,9 @@ export const emptyControl = (): Control => ({
   open: false,
   fist: false,
   bladeSign: false,
+  spearSign: false,
+  bindPose: false,
+  secondFist: false,
   twoHands: false,
   secondOpen: false,
   secondSign: false,
@@ -172,6 +178,14 @@ export class MotionControl {
       open: hand.open,
       fist: hand.extended === 0 && !this.pinched,
       bladeSign: !!hand.bladeSign,
+      spearSign: !!hand.spearSign,
+      secondFist: twoHands && second!.extended === 0,
+      bindPose:
+        twoHands &&
+        handGap > 0.08 &&
+        handGap < 0.4 &&
+        ((hand.open && second!.extended === 0) ||
+          (hand.extended === 0 && !!second?.open)),
       twoHands,
       secondOpen: twoHands && !!second?.open,
       secondSign: twoHands && !!second?.bladeSign,

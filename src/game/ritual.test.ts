@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Awakening, Ritual, inspectCircle } from "./ritual";
+import { Awakening, Ritual } from "./ritual";
 import { emptyControl, type Control } from "./control";
 const input = (o: Partial<Control> = {}): Control => ({
   ...emptyControl(),
@@ -7,32 +7,28 @@ const input = (o: Partial<Control> = {}): Control => ({
   ...o,
 });
 const open = input({ open: true });
-const circle = (fraction = 1) =>
-  Array.from({ length: 65 }, (_, i) => ({
-    x: 0.5 + Math.cos((i / 64) * Math.PI * 2 * fraction) * 0.22,
-    y: 0.5 + (Math.sin((i / 64) * Math.PI * 2 * fraction) * 0.22) / 0.7,
-  }));
 function hold(r: Ritual, c: Control, ms: number, energy = 100) {
   let result = {};
   for (let t = 0; t < ms; t += 50) result = r.update(c, 50, energy);
   return result;
 }
+const sign = input({
+  twoHands: true,
+  bladeSign: true,
+  secondSign: true,
+  dualSign: true,
+});
+const palms = input({ twoHands: true, open: true, secondOpen: true });
 function prime(r: Ritual) {
-  hold(
-    r,
-    input({ twoHands: true, open: true, secondOpen: true, domainPose: true }),
-    750,
-  );
-}
-function draw(r: Ritual, path = circle(), allowed: string | null = null) {
-  for (const p of path)
-    r.update(input({ pinching: true, position: p }), 40, 100, allowed);
-  r.update(open, 40, 100, allowed);
+  hold(r, sign, 700);
 }
 describe("spell rituals", () => {
   it("tolerates brief recognition flicker without counting missing or incorrect poses as hold time", () => {
-    const pose = input({ twoHands: true, open: true, secondOpen: true, domainPose: true });
-    for (const missing of [emptyControl(), input({ twoHands: true, open: true, secondOpen: false })]) {
+    const pose = sign;
+    for (const missing of [
+      emptyControl(),
+      input({ twoHands: true, open: true, secondOpen: false }),
+    ]) {
       const r = new Ritual();
       hold(r, pose, 600);
       hold(r, missing, 150);
@@ -41,11 +37,11 @@ describe("spell rituals", () => {
       r.update(pose, 50, 100);
       expect(r.stage).toBe("idle");
       r.update(pose, 50, 100);
-      expect(r.stage).toBe("draw");
+      expect(r.stage).toBe("release");
     }
   });
   it("resets the initial hold after sustained tracking loss or an explicit pause", () => {
-    const pose = input({ domainPose: true });
+    const pose = sign;
     const r = new Ritual();
     hold(r, pose, 600);
     for (let i = 0; i < 5; i++) r.pause(50);
@@ -88,24 +84,6 @@ describe("spell rituals", () => {
     hold(r, input({ bladeSign: true }), 350, 0);
     expect(r.update(input({ slash }), 50, 0).slash).toEqual(slash);
   });
-  it("accepts approximate circles in either direction and rejects open arcs and scribbles", () => {
-    expect(inspectCircle(circle()).ok).toBe(true);
-    expect(inspectCircle(circle().reverse()).ok).toBe(true);
-    expect(inspectCircle(circle(0.7)).hint).toContain("Соедини");
-    expect(
-      inspectCircle(
-        circle().map((p) => ({ x: 0.5 + (p.x - 0.5) * 0.1, y: p.y })),
-      ).ok,
-    ).toBe(false);
-    expect(
-      inspectCircle(
-        Array.from({ length: 65 }, (_, i) => ({
-          x: 0.5 + 0.2 * Math.cos(i),
-          y: 0.5 + 0.2 * Math.sin(i * 2),
-        })),
-      ).ok,
-    ).toBe(false);
-  });
   it("a long moving stroke must settle into a new sign before it can cast twice", () => {
     const r = new Ritual();
     hold(r, input({ bladeSign: true }), 350, 0);
@@ -124,70 +102,75 @@ describe("spell rituals", () => {
       r.update({ ...moving, slash: { ...moving.slash!, id: 3 } }, 50, 0).slash,
     ).toBeDefined();
   });
-  it("requires energy, initial pose, a complete circle and a deliberate two-hand release", () => {
+  it("requires energy and two signed hands before a separate open-palm release", () => {
     const r = new Ritual();
-    hold(r, input({ domainPose: true }), 1500, 90);
+    hold(r, sign, 1000, 90);
     expect(r.stage).toBe("idle");
     prime(r);
-    expect(r.stage).toBe("draw");
-    draw(r, circle(0.7));
-    expect(r.stage).toBe("draw");
-    expect(r.hint).toContain("Соедини");
-    draw(r);
     expect(r.stage).toBe("release");
-    hold(r, open, 700);
+    expect(r.bladeMs).toBe(0);
+    hold(r, open, 800);
     expect(r.stage).toBe("release");
-    hold(r, input({ open: true, secondOpen: true, handGap: 0.4 }), 350);
-    expect(
-      r.update(input({ open: true, secondOpen: true, handGap: 0.4 }), 50, 100)
-        .domain,
-    ).toBe(true);
-    expect(r.stage).toBe("idle");
+    expect(r.hint).toContain("вторую руку");
+    hold(r, palms, 300);
+    expect(r.update(palms, 50, 100).domain).toBe(true);
+    expect(r.update(palms, 50, 100).domain).toBeUndefined();
   });
-  it("does not close a drawing when tracking is lost", () => {
+  it("preserves an accepted seal on loss but requires a fresh complete release hold", () => {
     const r = new Ritual();
     prime(r);
-    for (const p of circle().slice(0, 20))
-      r.update(input({ pinching: true, position: p }), 40, 100);
-    r.update(emptyControl(), 50, 100);
-    expect(r.stage).toBe("draw");
-    expect(r.path).toHaveLength(0);
-    expect(r.update(open, 50, 100).domain).toBeUndefined();
-    draw(r);
-    expect(r.stage).toBe("release");
-  });
-  it("keeps a completed circle on pause but requires a fresh two-hand release", () => {
-    const r = new Ritual();
-    prime(r);
-    draw(r);
-    hold(r, input({ open: true, secondOpen: true, handGap: 0.4 }), 200);
+    hold(r, palms, 200);
     r.update(emptyControl(), 50, 100);
     expect(r.stage).toBe("release");
-    expect(r.circle?.ok).toBe(true);
     expect(r.releaseHold).toBe(0);
-    expect(
-      r.update(input({ open: true, secondOpen: true, handGap: 0.4 }), 200, 100)
-        .domain,
-    ).toBeUndefined();
-    expect(
-      r.update(input({ open: true, secondOpen: true, handGap: 0.4 }), 200, 100)
-        .domain,
-    ).toBe(true);
+    expect(r.update(palms, 200, 100).domain).toBeUndefined();
+    expect(r.update(palms, 150, 100).domain).toBe(true);
   });
-  it("lets a novice take their time drawing during the territory lesson", () => {
+  it("expires an unfinished battle seal but gives the lesson unlimited time", () => {
     const r = new Ritual();
     prime(r);
-    for (let t = 0; t < 24000; t += 50) r.update(open, 50, 100, "domain");
-    expect(r.stage).toBe("draw");
-    draw(r, circle(), "domain");
-    expect(r.stage).toBe("release");
-  });
-  it("expires unfinished rituals without spending energy", () => {
-    const r = new Ritual();
-    prime(r);
-    hold(r, open, 18500);
+    hold(r, sign, 8100);
     expect(r.stage).toBe("idle");
-    expect(r.hint).toContain("рассеялся");
+    expect(r.hint).toContain("рассеялась");
+    const lesson = new Ritual();
+    prime(lesson);
+    for (let t = 0; t < 24000; t += 50) lesson.update(sign, 50, 100, "domain");
+    expect(lesson.stage).toBe("release");
+  });
+  it("casts each extra technique only after its unlock and a deliberate hold", () => {
+    const r = new Ritual(),
+      spear = input({ spearSign: true });
+    for (let t = 0; t < 800; t += 50)
+      expect(r.update(spear, 50, 0, null, 0).spear).toBeUndefined();
+    for (let t = 0; t < 550; t += 50)
+      expect(r.update(spear, 50, 0, null, 1).spear).toBeUndefined();
+    expect(r.update(spear, 50, 0, null, 1).spear).toBeDefined();
+    for (let t = 0; t < 5000; t += 50)
+      expect(r.update(spear, 50, 0, null, 1).spear).toBeUndefined();
+    r.update(open, 50, 0, null, 1);
+    for (let t = 0; t < 550; t += 50) r.update(spear, 50, 0, null, 1);
+    expect(r.update(spear, 50, 0, null, 1).spear).toBeDefined();
+    const bind = input({
+      bindPose: true,
+      twoHands: true,
+      open: true,
+      secondFist: true,
+    });
+    r.update(bind, 50, 0, null, 2); // A different deliberate seal can follow the spear.
+    expect(r.bindHold).toBe(50);
+    r.update(open, 50, 0, null, 2);
+    for (let t = 0; t < 600; t += 50) r.update(bind, 50, 0, null, 2);
+    expect(r.update(bind, 50, 0, null, 2).bind).toBe(true);
+    expect(r.bladeMs).toBe(0);
+    expect(r.vortex).toBeNull();
+  });
+  it("does not complete a spear hold through tracking loss", () => {
+    const r = new Ritual(),
+      spear = input({ spearSign: true });
+    for (let t = 0; t < 500; t += 50) r.update(spear, 50, 0, null, 1);
+    r.update(emptyControl(), 50, 0, null, 1);
+    expect(r.update(spear, 200, 0, null, 1).spear).toBeUndefined();
+    expect(r.spearHold).toBe(0);
   });
 });
 it("awakening waits for the reveal, then requires a held sign followed by separated hands", () => {

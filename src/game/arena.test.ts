@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { Arena, BOSS, advice, freshStats } from "./arena";
+import {
+  Arena,
+  BOSS,
+  BOSS_HP,
+  FINAL_PHASE_MS,
+  ROUND_MS,
+  advice,
+  freshStats,
+} from "./arena";
 import { emptyControl, type Control } from "./control";
 const input = (o: Partial<Control> = {}): Control => ({
   ...emptyControl(),
@@ -42,7 +50,7 @@ describe("spatial spell combat", () => {
     );
     a.entities = [];
     advance(a, 300);
-    expect(a.bossHp).toBe(240);
+    expect(a.bossHp).toBe(BOSS_HP);
     expect(a.stats.offTargetCuts).toBe(0);
     expect(a.hint).toContain("завеса");
     expect(a.drainEvents()).toContainEqual(
@@ -51,7 +59,9 @@ describe("spatial spell combat", () => {
   });
   it("shows actual damage, including the final hit, and ends the attack window on victory", () => {
     const a = battle();
-    a.elapsed = 70000;
+    a.elapsed = FINAL_PHASE_MS + 5000;
+    a.tick(1, input());
+    advance(a, 4000);
     a.phase = 2;
     a.bossHp = 7;
     a.magic.bladeMs = 1000;
@@ -76,7 +86,7 @@ describe("spatial spell combat", () => {
   it("keeps the opening countdown continuous when territory bridges a boss cycle", () => {
     const a = battle();
     a.phase = 2;
-    a.elapsed = 73000;
+    a.elapsed = FINAL_PHASE_MS + 8000;
     expect(a.attackWindowMs).toBe(1000);
     a.domainMs = 6000;
     expect(a.attackWindowMs).toBe(10000);
@@ -84,7 +94,7 @@ describe("spatial spell combat", () => {
     a.tick(2000, emptyControl());
     expect(a.attackWindowMs).toBe(remaining);
     a.domainMs = 0;
-    a.elapsed = 66000;
+    a.elapsed = FINAL_PHASE_MS + 1000;
     expect(a.attackWindowMs).toBe(0);
   });
   it("draws multiple enemies into the actual vortex and releases a physical wave", () => {
@@ -172,33 +182,66 @@ describe("spatial spell combat", () => {
     advance(a, 2000);
     expect(a.shieldEnergy).toBeGreaterThan(30);
   });
-  it("expands territory only after the entire drawn ritual", () => {
+  it("expands territory after a two-hand sign and open palms without drawing", () => {
     const a = new Arena("domain");
     advance(
       a,
-      750,
-      input({ open: true, secondOpen: true, twoHands: true, domainPose: true }),
+      700,
+      input({
+        dualSign: true,
+        bladeSign: true,
+        secondSign: true,
+        twoHands: true,
+      }),
     );
-    expect(a.magic.stage).toBe("draw");
-    for (let i = 0; i <= 64; i++) {
-      const angle = (i / 64) * Math.PI * 2;
-      a.tick(
-        40,
-        input({
-          pinching: true,
-          position: {
-            x: 0.5 + 0.22 * Math.cos(angle),
-            y: 0.5 + (0.22 / 0.7) * Math.sin(angle),
-          },
-        }),
-      );
-    }
-    a.tick(50, open);
     expect(a.magic.stage).toBe("release");
-    advance(a, 450, input({ open: true, secondOpen: true, handGap: 0.4 }));
+    advance(a, 350, input({ open: true, secondOpen: true, twoHands: true }));
     expect(a.stats.domains).toBe(1);
     expect(a.practiceDone).toBe(true);
     expect(a.domainMs).toBeGreaterThan(7000);
+  });
+  it("allows hands down during scheduled rest and keeps combat frozen", () => {
+    const a = battle();
+    a.elapsed = 17999;
+    a.tick(1, input());
+    expect(a.restMs).toBe(4000);
+    const time = a.elapsed,
+      health = a.health;
+    a.tick(2000, emptyControl());
+    expect(a.elapsed).toBe(time);
+    expect(a.health).toBe(health);
+    expect(a.restMs).toBe(2000);
+    a.tick(2000, emptyControl(), true);
+    expect(a.paused).toBe(true);
+    expect(a.restMs).toBe(2000);
+    a.tick(2000, emptyControl());
+    expect(a.restMs).toBe(0);
+    a.tick(2000, emptyControl());
+    expect(a.elapsed).toBe(time);
+  });
+  it("a spear pierces armor along its aimed line and bindings freeze enemy movement", () => {
+    const a = battle();
+    a.elapsed = 12000;
+    a.tick(1, input());
+    const target = a.spawn("armored", { x: 0.5, y: 0.5 }, { x: 0, y: 0 }, 0);
+    advance(a, 650, input({ spearSign: true, position: { x: 0.5, y: 0.35 } }));
+    expect(a.entities).not.toContain(target);
+    expect(a.stats.spearHits).toBe(1);
+    a.elapsed = FINAL_PHASE_MS;
+    a.tick(1, input());
+    advance(a, 4000);
+    const orb = a.spawn("orb", { x: 0.3, y: 0.4 }, { x: 0, y: 0.1 }, 0);
+    advance(
+      a,
+      700,
+      input({ bindPose: true, twoHands: true, open: true, secondFist: true }),
+    );
+    expect(a.stats.binds).toBe(1);
+    const y = orb.y;
+    advance(a, 1000, input());
+    expect(orb.y).toBe(y);
+    advance(a, 2500, input());
+    expect(orb.y).toBeGreaterThan(y);
   });
   it("completes all three phases and can win using real spell actions", () => {
     const a = battle();
@@ -216,7 +259,7 @@ describe("spatial spell combat", () => {
     }
     expect(a.phase).toBe(2);
     expect(a.status).toBe("victory");
-    expect(a.stats.bursts).toBeGreaterThan(10);
+    expect(a.stats.bursts).toBeGreaterThan(5);
     expect(a.score).toBeGreaterThan(0);
   });
   it("ends on destroyed core or timeout and freezes completed scores", () => {
@@ -226,7 +269,7 @@ describe("spatial spell combat", () => {
     a.tick(50, input());
     expect(a.status).toBe("defeat");
     const b = battle();
-    b.elapsed = 149999;
+    b.elapsed = ROUND_MS - 1;
     b.tick(50, input());
     expect(b.status).toBe("defeat");
     const score = b.score;

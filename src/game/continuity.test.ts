@@ -79,32 +79,23 @@ it("keeps a neutral visual cursor during grace, then removes it on confirmed los
   expect(follower.draw(t.expire(missing, 401), 401).valid).toBe(false);
 });
 
-it("preserves an unfinished circle across a nearby same-pose reacquisition", () => {
+it("preserves an accepted two-hand seal through a short gap without releasing it", () => {
   const world = new Arena("domain"),
     tracking = new TrackingContinuity();
-  const palms = pose({
-    open: true,
+  const sign = pose({
     twoHands: true,
-    secondOpen: true,
-    domainPose: true,
+    bladeSign: true,
+    secondSign: true,
+    dualSign: true,
   });
-  for (let t = 0; t <= 750; t += 50) world.tick(50, tracking.update(palms, t));
-  expect(world.magic.stage).toBe("draw");
-  const pinch = pose({ pinching: true, position: { x: 0.7, y: 0.5 } });
-  world.tick(50, tracking.update(pinch, 800));
-  world.tick(
-    50,
-    tracking.update({ ...pinch, position: { x: 0.68, y: 0.52 } }, 850),
-  );
-  const path = [...world.magic.path];
-  world.tick(100, tracking.update(emptyControl(), 900));
-  expect(world.magic.path).toEqual(path);
-  expect(world.magic.drawing).toBe(true);
-  world.tick(
-    16,
-    tracking.update({ ...pinch, position: { x: 0.65, y: 0.54 } }, 1000),
-  );
-  expect(world.magic.path.slice(0, path.length)).toEqual(path);
-  expect(world.magic.path.length).toBe(path.length + 1);
-  expect(world.magic.stage).toBe("draw");
+  for (let t = 0; t < 750; t += 50) world.tick(50, tracking.update(sign, t));
+  expect(world.magic.stage).toBe("release");
+  world.tick(100, tracking.update(emptyControl(), 750));
+  expect(world.stats.domains).toBe(0);
+  world.tick(50, tracking.update(sign, 850));
+  expect(world.magic.stage).toBe("release");
+  const palms = pose({ twoHands: true, open: true, secondOpen: true });
+  for (let t = 900; t < 1250; t += 50)
+    world.tick(50, tracking.update(palms, t));
+  expect(world.stats.domains).toBe(1);
 });

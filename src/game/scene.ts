@@ -6,7 +6,7 @@ import {
   BEAM_HOLD_MS,
   type FX,
 } from "./arena";
-import { clamp, distance, DOMAIN_NEAR_DISTANCE, type Control } from "./control";
+import { clamp, distance, type Control } from "./control";
 import type { Point } from "../gestures";
 type Particle = Point & {
   vx: number;
@@ -331,7 +331,7 @@ export class Scene {
     const ox = (w - fieldW) / 2,
       oy = 82 + Math.max(0, (h - 210 - fieldH) * 0.32);
     const to = (p: Point) => ({ x: ox + p.x * fieldW, y: oy + p.y * fieldH });
-    const intro = ["idle", "loading", "awakening"].includes(
+    const intro = ["idle", "loading", "preparation", "awakening"].includes(
       this.presentation.mode,
     );
     const boss = to(intro ? { x: 0.5, y: 0.32 } : BOSS),
@@ -729,82 +729,52 @@ export class Scene {
         c.beginPath();
         c.arc(p.x, p.y, 3, 0, TAU);
         c.fill();
-        if (world.magic.stage !== "idle") {
-          if (world.magic.stage === "draw") {
-            const center = to({ x: 0.5, y: 0.52 }),
-              radius = fieldW * 0.22;
-            c.save();
-            c.strokeStyle = "#dfc5ff88";
-            c.lineWidth = 1.4;
-            c.setLineDash([5, 7]);
+        if (world.magic.stage === "release" || world.magic.domainHold > 0) {
+          const center = to({ x: 0.5, y: 0.52 });
+          this.seal(
+            center.x,
+            center.y,
+            fieldW * 0.2,
+            t * 0.3,
+            "#ffe0aa",
+            world.magic.stage === "release" ? 1 : world.magic.domainHold / 700,
+          );
+          if (input.secondPosition) {
+            const other = to(input.secondPosition);
+            c.strokeStyle = input.dualSign ? "#a5ffe0" : "#d4b4ff66";
+            c.lineWidth = 2;
             c.beginPath();
-            c.arc(center.x, center.y, radius, 0, TAU);
+            c.moveTo(p.x, p.y);
+            c.lineTo(other.x, other.y);
             c.stroke();
-            c.setLineDash([]);
-            for (let i = 0; i < 4; i++) {
-              const a = (i * Math.PI) / 2,
-                x = center.x + Math.cos(a) * radius,
-                y = center.y + Math.sin(a) * radius;
-              c.fillStyle = i === 0 ? "#f0d9ff" : "#b496d080";
-              c.beginPath();
-              c.arc(x, y, i === 0 ? 7 : 3, 0, TAU);
-              c.fill();
-            }
-            c.font = "10px Manrope,sans-serif";
-            c.textAlign = "center";
-            c.fillStyle = "#f0d9ff";
-            c.fillText("НАЧНИ ЗДЕСЬ", center.x + radius, center.y - 17);
-            if (!world.magic.drawing && !this.reduced.matches) {
-              const a = t * 1.2;
-              c.fillStyle = "#dfb7ff";
-              c.beginPath();
-              c.arc(
-                center.x + Math.cos(a) * radius,
-                center.y + Math.sin(a) * radius,
-                5,
-                0,
-                TAU,
-              );
-              c.fill();
-            }
-            c.restore();
-          }
-          const path = world.magic.path;
-          c.strokeStyle = world.magic.circle?.ok
-            ? "#ffdf9f"
-            : world.magic.circle
-              ? "#ff9aa8"
-              : "#d5b6ff";
-          c.lineWidth = 3;
-          c.shadowColor = c.strokeStyle;
-          c.shadowBlur = 16;
-          c.beginPath();
-          path.forEach((v, i) => {
-            const q = to(v);
-            if (i) c.lineTo(q.x, q.y);
-            else c.moveTo(q.x, q.y);
-          });
-          c.stroke();
-          c.shadowBlur = 0;
-          if (world.magic.circle?.ok) {
-            const center = to(world.magic.circle.center);
-            this.seal(
-              center.x,
-              center.y,
-              world.magic.circle.radius * fieldW,
-              t * 0.3,
-              "#ffe0aa",
-            );
-          } else if (path.length) {
-            const first = to(path[0]);
-            c.setLineDash([2, 5]);
-            c.beginPath();
-            c.arc(first.x, first.y, 14, 0, TAU);
-            c.stroke();
-            c.setLineDash([]);
           }
         }
-      } else this.trail = [];
+        if (world.magic.spearHold > 0) {
+          this.seal(p.x, p.y, 28, -t, "#ffd697", world.magic.spearHold / 600);
+          c.strokeStyle = "#ffe6a766";
+          c.setLineDash([4, 8]);
+          c.beginPath();
+          c.moveTo(core.x, core.y);
+          c.lineTo(p.x, p.y);
+          c.stroke();
+          c.setLineDash([]);
+        }
+      }
+      if (world.bindMs > 0) {
+        c.save();
+        c.strokeStyle = "#9bd9ffc0";
+        c.lineWidth = 2;
+        for (const e of world.entities.filter((e) => e.team === "enemy")) {
+          const target = to(e);
+          this.seal(target.x, target.y, fieldW * (e.r + 0.022), 0, "#b4e7ff");
+          c.beginPath();
+          c.moveTo(target.x - 22, target.y + 30);
+          c.lineTo(target.x + 22, target.y - 30);
+          c.stroke();
+        }
+        c.restore();
+      }
+      if (!input.valid || world.ended) this.trail = [];
     }
     for (const f of this.effects) {
       f.age += dt;
@@ -812,7 +782,27 @@ export class Scene {
         fade = clamp(1 - f.age / (f.type === "domain" ? 3 : 1.3));
       c.save();
       c.globalAlpha = fade;
-      if (f.type === "slash" && f.to) {
+      if (f.type === "spear" && f.to) {
+        const end = to(f.to);
+        c.strokeStyle = "#ffe0a8";
+        for (const width of [15, 5, 1.5]) {
+          c.globalAlpha = fade * (width === 15 ? 0.16 : 0.9);
+          c.lineWidth = width;
+          c.beginPath();
+          c.moveTo(p.x, p.y);
+          c.lineTo(end.x, end.y);
+          c.stroke();
+        }
+        this.seal(end.x, end.y, fieldW * (0.03 + f.age * 0.08), 0, "#ffe0a8");
+      } else if (f.type === "bind") {
+        this.seal(
+          w * 0.5,
+          h * 0.5,
+          fieldW * (0.1 + f.age * 0.3),
+          -f.age,
+          "#a5daff",
+        );
+      } else if (f.type === "slash" && f.to) {
         const end = to(f.to),
           cut = f.age > 0.22;
         c.strokeStyle = cut ? "#ffefff" : "#d2a1ff";
@@ -928,9 +918,39 @@ export class Scene {
       );
       c.restore();
       const portal = this.effects.find((f) => f.type === "domain");
-      if (portal && !this.reduced.matches) {
-        c.fillStyle = `rgba(224,207,255,${Math.max(0, 0.32 - portal.age * 0.3)})`;
+      if (portal) {
+        c.save();
+        const age = portal.age;
+        c.fillStyle = `rgba(2,2,10,${Math.max(0, 0.88 * (1 - age / 1.1))})`;
         c.fillRect(0, 0, w, h);
+        if (!this.reduced.matches) {
+          const expansion = clamp((age - 0.45) / 1.1);
+          this.seal(
+            w * 0.5,
+            h * 0.48,
+            Math.max(w, h) * (0.04 + expansion * 0.8),
+            -age * 0.15,
+            "#f4dbb9",
+          );
+          c.strokeStyle = `rgba(237,215,255,${Math.max(0, 0.8 - age * 0.24)})`;
+          c.lineWidth = 1.5;
+          for (let i = 0; i < 12; i++) {
+            const a = (i * TAU) / 12,
+              reach = Math.max(w, h) * expansion;
+            c.beginPath();
+            c.moveTo(w * 0.5 + Math.cos(a) * 45, h * 0.48 + Math.sin(a) * 45);
+            c.lineTo(
+              w * 0.5 + Math.cos(a + 0.08) * reach * 0.45,
+              h * 0.48 + Math.sin(a + 0.08) * reach * 0.45,
+            );
+            c.lineTo(
+              w * 0.5 + Math.cos(a) * reach,
+              h * 0.48 + Math.sin(a) * reach,
+            );
+            c.stroke();
+          }
+        }
+        c.restore();
       }
     }
     if (intro) {
@@ -1003,16 +1023,15 @@ export class Scene {
       ) {
         const a = to(input.position),
           b = to(input.secondPosition);
-        const gap = distance(input.position, input.secondPosition);
-        const near = gap <= DOMAIN_NEAR_DISTANCE;
-        const bothOpen = input.open && input.secondOpen;
-        const color = input.domainPose ? "#95f4dd" : "#f4ce92";
+        const near = input.handGap > 0.08 && input.handGap < 0.28;
+        const bothSigned = input.bladeSign && input.secondSign;
+        const color = input.dualSign ? "#95f4dd" : "#f4ce92";
         const x = clamp((a.x + b.x) / 2, 115, w - 115);
         const y = Math.max(100, Math.min(a.y, b.y) - 52);
         c.save();
         c.strokeStyle = color;
-        c.lineWidth = input.domainPose ? 3 : 2;
-        c.setLineDash(input.domainPose ? [] : [5, 7]);
+        c.lineWidth = input.dualSign ? 3 : 2;
+        c.setLineDash(input.dualSign ? [] : [5, 7]);
         c.beginPath();
         c.moveTo(a.x, a.y);
         c.lineTo(b.x, b.y);
@@ -1025,11 +1044,11 @@ export class Scene {
         c.textAlign = "center";
         c.textBaseline = "middle";
         c.fillText(
-          !bothOpen
-            ? "РАСКРОЙ ОБЕ ЛАДОНИ"
+          !bothSigned
+            ? "✌ НА КАЖДОЙ РУКЕ"
             : near
-              ? "ВЕРНО · УДЕРЖИ ЛАДОНИ"
-              : `СБЛИЗЬ · ЕЩЁ ${Math.ceil((1 - DOMAIN_NEAR_DISTANCE / gap) * 100)}%`,
+              ? "ВЕРНО · УДЕРЖИ ПЕЧАТЬ"
+              : "КИСТИ РЯДОМ · БЕЗ ПЕРЕКРЫТИЯ",
           x,
           y,
         );
@@ -1039,10 +1058,7 @@ export class Scene {
         c.fillRect(
           x - 92,
           y + 13,
-          184 *
-            (near
-              ? clamp(world.magic.domainHold / 700)
-              : clamp(DOMAIN_NEAR_DISTANCE / gap)),
+          184 * clamp(world.magic.domainHold / 700),
           3,
         );
         c.restore();

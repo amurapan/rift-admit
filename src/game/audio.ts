@@ -38,6 +38,8 @@ export class Sound {
     type: OscillatorType = "sine",
     volume = 0.3,
     end = frequency,
+    delay = 0,
+    attack = 0.012,
   ) {
     if (
       !this.context ||
@@ -47,7 +49,7 @@ export class Sound {
       this.context.state !== "running"
     )
       return;
-    const time = this.context.currentTime,
+    const time = this.context.currentTime + delay,
       oscillator = this.context.createOscillator(),
       gain = this.context.createGain();
     oscillator.type = type;
@@ -57,11 +59,11 @@ export class Sound {
       time + duration,
     );
     gain.gain.setValueAtTime(0.001, time);
-    gain.gain.exponentialRampToValueAtTime(volume, time + 0.012);
+    gain.gain.exponentialRampToValueAtTime(volume, time + attack);
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
     oscillator.connect(gain);
     gain.connect(this.master);
-    oscillator.start();
+    oscillator.start(time);
     oscillator.stop(time + duration + 0.02);
     this.voices++;
     oscillator.onended = () => {
@@ -121,9 +123,37 @@ export class Sound {
         this.tone(123.5, 1.8, "triangle", 0.2);
         break;
       case "domain":
-        [82.4, 164.8, 247, 329.6].forEach((f) =>
-          this.tone(f, 3, "sine", 0.25, f * 1.5),
+        // A breath of silence, low impact, bell overtones, then a slow chord.
+        if (this.context) this.nextBeat = this.context.currentTime + 3.5;
+        this.tone(90, 0.4, "sine", 0.14, 40);
+        this.tone(55, 2.4, "sine", 0.85, 28, 0.5);
+        this.tone(110, 1.4, "triangle", 0.22, 55, 0.5);
+        [220, 440, 660, 923].forEach((f, i) =>
+          this.tone(
+            f,
+            2.7,
+            "sine",
+            0.19 / (1 + i * 0.3),
+            f * 0.99,
+            0.55 + i * 0.035,
+          ),
         );
+        [130.8, 196, 261.6, 311.1, 392].forEach((f, i) =>
+          this.tone(f, 3.2, "triangle", 0.085, f, 0.8 + i * 0.07, 0.65),
+        );
+        break;
+      case "spear":
+        this.tone(180, 0.45, "sawtooth", 0.1, 1100);
+        this.tone(660, 0.7, "sine", 0.35, 165, 0.08);
+        break;
+      case "bind":
+        [220, 293.7, 440].forEach((f, i) =>
+          this.tone(f, 1.4, "triangle", 0.18, f, i * 0.1),
+        );
+        break;
+      case "rest":
+        this.tone(196, 1.8, "sine", 0.2);
+        this.tone(293.7, 2, "sine", 0.15, 293.7, 0.12);
         break;
       case "victory":
         [261.6, 329.6, 392, 523.2].forEach((f) => this.tone(f, 2, "sine", 0.3));

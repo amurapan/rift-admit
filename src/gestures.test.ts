@@ -52,3 +52,16 @@ describe("hand geometry", () => {
     expect(describeHand(malformed)).toBeNull();
   });
 });
+
+it("distinguishes the spear seal from the blade and a pinch using actual landmarks", () => {
+  const p = openPoints();
+  for (const i of [9, 13, 17]) p[i + 3] = { ...p[i], y: p[i].y + 0.04 };
+  expect(describeHand(p)?.spearSign).toBe(true);
+  expect(describeHand(p)?.bladeSign).toBe(false);
+  p[4] = { x: p[8].x + 0.01, y: p[8].y };
+  expect(describeHand(p)?.spearSign).toBe(false);
+  const sign = openPoints();
+  for (const i of [13, 17]) sign[i + 3] = { ...sign[i], y: sign[i].y + 0.04 };
+  expect(describeHand(sign)?.bladeSign).toBe(true);
+  expect(describeHand(sign)?.spearSign).toBe(false);
+});

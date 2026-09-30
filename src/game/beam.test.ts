@@ -1,5 +1,11 @@
 import { expect, it } from "vitest";
-import { Arena, BEAM_CHARGE_MS, BEAM_HOLD_MS } from "./arena";
+import {
+  Arena,
+  BOSS_HP,
+  FINAL_PHASE_MS,
+  BEAM_CHARGE_MS,
+  BEAM_HOLD_MS,
+} from "./arena";
 import { emptyControl, type Control } from "./control";
 const input = (extra: Partial<Control> = {}): Control => ({
   ...emptyControl(),
@@ -12,8 +18,13 @@ function advance(world: Arena, ms: number, control = input()) {
 function charging(final = false) {
   const world = new Arena();
   world.status = "fighting";
-  world.elapsed = final ? 65001 : 6999;
+  world.elapsed = final ? FINAL_PHASE_MS + 1 : 6999;
   world.tick(1, input());
+  if (world.restMs) {
+    world.tick(4000, input());
+    world.elapsed += 3000;
+    world.tick(1, input());
+  }
   expect(world.beam?.stage).toBe("charging");
   return world;
 }
@@ -80,7 +91,7 @@ it("lets a defensive palm replace an armed blade and opens the final boss on ret
   advance(world, world.beam!.remaining + 1, defend(world));
   expect(world.magic.bladeMs).toBe(0);
   expect(world.stats.beamsReflected).toBe(1);
-  expect(world.bossHp).toBe(208);
+  expect(world.bossHp).toBe(BOSS_HP - 32);
   expect(world.exposed).toBe(true);
 });
 it("territory dispels the ray and practice never introduces a boss attack", () => {

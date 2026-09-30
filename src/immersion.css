@@ -933,3 +933,344 @@ aside {
   font-size: 11px;
   text-align: left;
 }
+
+/* Camera preparation: short, gesture-confirmed cards. */
+.preparation {
+  position: absolute;
+  inset: 0;
+  z-index: 21;
+  display: grid;
+  place-items: center;
+  padding: 78px 20px 130px;
+  background: #04050be8;
+}
+.preparation-card {
+  width: min(100%, 490px);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 26px 32px 22px;
+  border: 1px solid #baa0ee40;
+  border-radius: 22px;
+  background:
+    radial-gradient(ellipse at 50% 0, #33214788, transparent 65%), #100e19;
+  box-shadow: 0 25px 100px #0009;
+  text-align: center;
+}
+.preparation-card h2 {
+  font-size: clamp(23px, 3vw, 33px);
+  font-weight: 500;
+  margin: 10px 0 14px;
+}
+.preparation-card > p:not(.eyebrow) {
+  font-size: 13px;
+  color: #c9bdd8;
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+.preparation-card > small {
+  display: block;
+  font-size: 9px;
+  line-height: 1.6;
+  color: #9d90af;
+}
+.preparation-card svg {
+  width: 100%;
+  max-height: 170px;
+  overflow: visible;
+}
+.preparation-card svg path,
+.preparation-card svg circle {
+  fill: none;
+  stroke: #d8bcff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.preparation-card .prep-frame {
+  stroke: #93e7c8;
+  stroke-dasharray: 5 4;
+}
+.prep-person {
+  transform-origin: 180px 145px;
+}
+.prep-direction,
+.prep-sun {
+  opacity: 0;
+}
+[data-kind="distance"] .prep-person {
+  animation: prep-distance 3.5s ease-in-out infinite;
+}
+[data-kind="distance"] .prep-direction {
+  opacity: 0.7;
+}
+[data-kind="light"] .prep-sun {
+  animation: prep-light 3.5s ease-in-out infinite;
+}
+[data-kind="light"] .prep-person {
+  animation: prep-illuminate 3.5s ease-in-out infinite;
+}
+[data-kind="comfort"] .prep-arms {
+  transform-origin: 180px 95px;
+  animation: prep-relax 3.5s ease-in-out infinite;
+}
+.preparation-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 48px;
+  font-size: 12px;
+  color: #b7efd9;
+}
+.palm-confirm {
+  font-size: 28px;
+}
+.preparation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+.preparation-actions .text-button {
+  margin: 0;
+  padding: 10px;
+  font-size: 11px;
+}
+.preparing .camera-card {
+  z-index: 26;
+}
+.preparing .header #help {
+  opacity: 0.4;
+  pointer-events: none;
+}
+#show-preparation {
+  display: none;
+}
+.help-open #show-preparation {
+  display: block;
+  margin: 12px;
+}
+.rest-panel {
+  position: absolute;
+  z-index: 16;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -20%);
+  width: min(88vw, 450px);
+  padding: 24px;
+  text-align: center;
+  border: 1px solid #a4efd64a;
+  border-radius: 20px;
+  background: #0c181be8;
+  box-shadow: 0 0 100px #68d8b415;
+}
+.rest-panel h2 {
+  font-size: 40px;
+  font-weight: 400;
+  margin: 10px 0;
+}
+.rest-panel p {
+  font-size: 12px;
+  color: #b5dcd0;
+  line-height: 1.6;
+}
+.rest-panel strong {
+  display: block;
+  font-size: 32px;
+  color: #d1ffee;
+  margin: 15px;
+}
+.rest-panel .rest-art {
+  width: 180px;
+  height: 80px;
+  margin: auto;
+}
+.extra-spell {
+  padding: 20px 0;
+  border-top: 1px solid #aa88cf30;
+  opacity: 0.7;
+}
+.extra-spell.unlocked {
+  opacity: 1;
+}
+.extra-spell h3 {
+  font-size: 16px;
+  margin: 10px 0;
+}
+.extra-spell p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #b9accb;
+}
+.extra-spell svg {
+  width: 100%;
+  max-height: 110px;
+}
+.spell {
+  position: relative;
+  flex-wrap: wrap;
+}
+.spell-reference {
+  flex-basis: 100%;
+  height: 88px;
+}
+.spell-reference svg {
+  height: 100%;
+  width: 100%;
+}
+.live-gesture-art {
+  float: right;
+  width: 106px;
+  height: 52px;
+  margin: 0 0 4px 12px;
+}
+.live-gesture-art svg {
+  width: 100%;
+  height: 100%;
+}
+.art-caption {
+  fill: #d6c7ea;
+  font:
+    11px Manrope,
+    sans-serif;
+  stroke: none;
+}
+.domain-signs {
+  animation: domain-sign 3s steps(1) infinite;
+}
+.domain-palms {
+  animation: domain-palm 3s steps(1) infinite;
+}
+.domain-seal {
+  animation: domain-palm 3s ease infinite;
+}
+.cinematic[data-kind="domain"] {
+  background: linear-gradient(transparent, #080611cf, transparent);
+  padding: 28px 10px;
+}
+.cinematic[data-kind="domain"] strong {
+  color: #f2dfbc;
+  font-size: clamp(22px, 4.8vw, 62px);
+  letter-spacing: 0.06em;
+}
+@keyframes prep-distance {
+  0%,
+  20% {
+    transform: scale(1.3);
+  }
+  65%,
+  100% {
+    transform: scale(0.82);
+  }
+}
+@keyframes prep-light {
+  0%,
+  20% {
+    opacity: 0.3;
+    transform: translate(-105px, -18px);
+  }
+  60%,
+  100% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+}
+@keyframes prep-illuminate {
+  0%,
+  20% {
+    opacity: 0.25;
+  }
+  60%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes prep-relax {
+  0%,
+  20% {
+    transform: translateY(-12px);
+  }
+  65%,
+  100% {
+    transform: translateY(8px) scaleY(0.85);
+  }
+}
+@keyframes domain-sign {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes domain-palm {
+  0%,
+  49% {
+    opacity: 0;
+  }
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+@media (max-width: 700px) {
+  .preparation {
+    padding: 65px 14px 125px;
+  }
+  .preparation-card {
+    padding: 18px 20px;
+    border-radius: 17px;
+  }
+  .preparation-card svg {
+    max-height: 125px;
+  }
+  .preparation-card > p:not(.eyebrow) {
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  .live-gesture-art {
+    width: 82px;
+    height: 42px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preparation *,
+  .domain-signs,
+  .domain-palms,
+  .domain-seal {
+    animation: none !important;
+  }
+  .domain-signs {
+    opacity: 1;
+    transform: translateX(-65px) scale(0.65);
+    transform-origin: 160px 75px;
+  }
+  .domain-palms {
+    opacity: 1;
+    transform: translateX(65px) scale(0.65);
+    transform-origin: 160px 75px;
+  }
+  .domain-seal {
+    opacity: 0.2;
+  }
+  [data-kind="light"] .prep-sun {
+    opacity: 1;
+  }
+}
+.rest-art svg {
+  width: 100%;
+  height: 100%;
+}
+.extra-status {
+  margin: 9px 0 0;
+  font-size: 8px;
+  line-height: 1.5;
+  color: #b9a6cd;
+  letter-spacing: 0.05em;
+}
+.preparing .arena-bottom {
+  z-index: 26;
+}

@@ -3,7 +3,11 @@ import { clamp, distance, type Control, type Slash } from "./control";
 import { Ritual } from "./ritual";
 export const CORE = { x: 0.5, y: 0.9 },
   BOSS = { x: 0.5, y: 0.2 },
-  ROUND_MS = 150000;
+  ROUND_MS = 65000,
+  FINAL_PHASE_MS = 24000,
+  SECOND_PHASE_MS = 12000,
+  BOSS_HP = 144;
+type Spell = Lesson | "spear" | "bind";
 export const BEAM_CHARGE_MS = 2800,
   BEAM_HOLD_MS = 450;
 export type Beam = {
@@ -25,6 +29,9 @@ export type Entity = Point & {
 };
 export type FX = {
   type:
+    | "spear"
+    | "bind"
+    | "rest"
     | "charge"
     | "warning"
     | "beam"
@@ -61,6 +68,9 @@ export type Stats = {
   failedRituals: number;
   beamsReflected: number;
   beamsMissed: number;
+  spears: number;
+  spearHits: number;
+  binds: number;
 };
 export type Advice = { lesson: Lesson; title: string; detail: string };
 export const freshStats = (): Stats => ({
@@ -76,6 +86,9 @@ export const freshStats = (): Stats => ({
   failedRituals: 0,
   beamsReflected: 0,
   beamsMissed: 0,
+  spears: 0,
+  spearHits: 0,
+  binds: 0,
 });
 export function advice(s: Stats): Advice {
   if (s.beamsMissed > s.beamsReflected)
@@ -87,9 +100,9 @@ export function advice(s: Stats): Advice {
   if (s.failedRituals > 0)
     return {
       lesson: "domain",
-      title: "Замкни печать",
+      title: "Раскрой печать",
       detail:
-        "Рисуй один крупный круг щипком. Соедини конец с началом, отпусти пальцы, затем разведи открытые ладони.",
+        "Удержи указательный и средний пальцы на обеих руках, затем раскрой обе ладони. Держи кисти рядом без перекрытия.",
     };
   if (s.offTargetCuts > s.cutHits)
     return {
@@ -124,9 +137,12 @@ export class Arena {
   elapsed = 0;
   phase = 0;
   health = 100;
-  bossHp = 240;
+  bossHp = BOSS_HP;
+  restMs = 0;
+  bindMs = 0;
+  private restIndex = 0;
   shieldEnergy = 100;
-  energy = 0;
+  energy = 30;
   domainMs = 0;
   score = 0;
   combo = 0;
@@ -161,7 +177,7 @@ export class Arena {
   private randomState = 51928;
   private overheated = false;
   private lastHit = 0;
-  private lastGesture: Lesson | null = null;
+  private lastGesture: Spell | null = null;
   private lastBossCycle = -1;
   constructor(public practice: Lesson | null = null) {
     if (practice) {
@@ -180,12 +196,12 @@ export class Arena {
     return (
       this.domainMs > 0 ||
       this.staggerMs > 0 ||
-      (this.phase === 2 && (this.elapsed - 65000) % 9000 > 4200)
+      (this.phase === 2 && (this.elapsed - FINAL_PHASE_MS) % 9000 > 4200)
     );
   }
   get attackWindowMs() {
     if (this.practice || this.ended || this.phase !== 2) return 0;
-    const cycle = (this.elapsed - 65000) % 9000;
+    const cycle = (this.elapsed - FINAL_PHASE_MS) % 9000;
     let remaining = Math.max(this.domainMs, this.staggerMs);
     if (cycle > 4200) remaining = Math.max(remaining, 9000 - cycle);
     // If territory or a reflected ray bridges into the next opening, the
@@ -262,7 +278,7 @@ export class Arena {
     if (this.phase > 0 && this.random() > 0.62)
       this.spawn("orb", { x: 1 - x, y: 0.3 });
   }
-  tick(deltaMs: number, input: Control) {
+  tick(deltaMs: number, input: Control, suspended = false) {
     if (
       this.ended ||
       this.practiceDone ||
@@ -270,6 +286,17 @@ export class Arena {
       deltaMs <= 0
     )
       return;
+    if (suspended) {
+      this.paused = true;
+      this.magic.pause();
+      return;
+    }
+    if (this.restMs > 0) {
+      this.restMs = Math.max(0, this.restMs - deltaMs);
+      this.shieldEnergy = Math.min(100, this.shieldEnergy + deltaMs * 0.04);
+      this.paused = false;
+      return;
+    }
     // Freeze simulation during a short detector gap without flashing a pause or
     // destroying a spell. No charge, damage, release or ritual time can advance.
     if (input.trackingGrace && !input.valid) return;
@@ -295,11 +322,11 @@ export class Arena {
       dt,
       this.domainMs ? 0 : this.energy,
       this.practice,
+      this.phase,
     );
     if (action.cue) {
       this.effect(action.cue, input.position);
-      if (action.cue === "fail" && this.magic.circle)
-        this.stats.failedRituals++;
+      if (action.failedDomain) this.stats.failedRituals++;
     }
     if (action.burst) {
       this.stats.bursts++;
@@ -335,6 +362,41 @@ export class Arena {
         continuation,
       });
     }
+    if (action.spear) {
+      this.stats.spears++;
+      this.effect("spear", CORE, "КОПЬЁ РАЗЛОМА", action.spear);
+      let hits = 0;
+      for (const e of [...this.entities]) {
+        if (
+          e.team === "enemy" &&
+          segmentDistance(e, CORE, action.spear) < e.r + 0.045
+        ) {
+          this.destroy(e, "spear");
+          hits++;
+        }
+      }
+      if (
+        this.phase === 2 &&
+        segmentDistance(BOSS, CORE, action.spear) < 0.11
+      ) {
+        this.bossDamage(this.exposed ? 24 : 12);
+        this.reward("spear", 120);
+        hits++;
+      }
+      if (hits) this.stats.spearHits++;
+      else
+        this.coach(
+          "Копьё прошло мимо. Перед выстрелом поставь курсор прямо на цель.",
+        );
+    }
+    if (action.bind) {
+      this.stats.binds++;
+      this.bindMs = 3000;
+      this.effect("bind", BOSS, "ОКОВЫ ВРЕМЕНИ");
+      this.coach(
+        "Снаряды скованы на три секунды. Заряди волну или атакуй босса.",
+      );
+    }
     if (action.domain) {
       this.energy = 0;
       this.domainMs = 7500;
@@ -345,7 +407,7 @@ export class Arena {
       this.effect("domain", BOSS, "РАСШИРЕНИЕ ТЕРРИТОРИИ");
       if (this.practice === "domain") this.practiceDone = true;
     }
-    while (dt > 0 && !this.ended && !this.practiceDone) {
+    while (dt > 0 && !this.ended && !this.practiceDone && !this.restMs) {
       const step = Math.min(dt, 1000 / 60);
       this.step(step, input);
       dt -= step;
@@ -359,7 +421,12 @@ export class Arena {
       this.finish(false);
       return;
     }
-    const phase = this.elapsed >= 65000 ? 2 : this.elapsed >= 30000 ? 1 : 0;
+    const phase =
+      this.elapsed >= FINAL_PHASE_MS
+        ? 2
+        : this.elapsed >= SECOND_PHASE_MS
+          ? 1
+          : 0;
     if (!this.practice && phase !== this.phase) {
       this.phase = phase;
       this.effect(
@@ -373,6 +440,25 @@ export class Arena {
           : "После залпа глаз открывается — рассеки его!",
       );
     }
+    if (
+      !this.practice &&
+      this.restIndex < 2 &&
+      this.elapsed >= [18000, 45000][this.restIndex]
+    ) {
+      this.restIndex++;
+      this.restMs = 4000;
+      this.entities = [];
+      this.waves = [];
+      this.cuts = [];
+      this.beam = null;
+      this.nextBeamAt = Math.max(this.nextBeamAt, this.elapsed + 3000);
+      this.magic.reset();
+      this.shieldActive = false;
+      this.energy = Math.min(100, this.energy + 15);
+      this.effect("rest", CORE, "ВЫДОХНИ");
+      return;
+    }
+    this.bindMs = Math.max(0, this.bindMs - ms);
     if (this.combo && this.elapsed - this.lastHit > 6500) this.combo = 0;
     this.domainMs = Math.max(0, this.domainMs - ms);
     this.staggerMs = Math.max(0, this.staggerMs - ms);
@@ -386,8 +472,11 @@ export class Arena {
       !this.staggerMs &&
       this.beam?.stage !== "charging"
     ) {
-      const cycle = Math.floor((this.elapsed - 65000) / 9000);
-      if ((this.elapsed - 65000) % 9000 >= 3000 && cycle > this.lastBossCycle) {
+      const cycle = Math.floor((this.elapsed - FINAL_PHASE_MS) / 9000);
+      if (
+        (this.elapsed - FINAL_PHASE_MS) % 9000 >= 3000 &&
+        cycle > this.lastBossCycle
+      ) {
         this.lastBossCycle = cycle;
         for (const x of [0.38, 0.5, 0.62])
           this.spawn("orb", { x, y: 0.28 }, undefined, 1400);
@@ -429,7 +518,7 @@ export class Arena {
     }
     this.stepBeam(ms, input);
     if (this.ended) return;
-    this.spawnMs -= ms * (this.domainMs ? 0.3 : 1);
+    this.spawnMs -= ms * (this.bindMs ? 0 : this.domainMs ? 0.3 : 1);
     if (this.spawnMs <= 0 && this.beam?.stage !== "charging") {
       this.spawnWave();
       this.spawnMs = this.practice ? 800 : [2300, 1800, 1400][this.phase];
@@ -487,7 +576,8 @@ export class Arena {
         e.y += (e.x - vortex.x) * dt * 0.7;
         if (d < 0.06) e.age = Math.min(e.age, 7000);
       } else {
-        const slow = this.domainMs && e.team === "enemy" ? 0.18 : 1;
+        const slow =
+          e.team === "enemy" ? (this.bindMs ? 0 : this.domainMs ? 0.18 : 1) : 1;
         e.x += e.vx * dt * slow;
         e.y += e.vy * dt * slow;
       }
@@ -552,7 +642,7 @@ export class Arena {
     if (this.elapsed > this.hintUntil)
       this.hint =
         this.energy >= 100
-          ? "Территория готова: сблизь открытые ладони, затем нарисуй круг щипком."
+          ? "Территория готова: ✌ на обеих руках → раскрой обе ладони."
           : this.phase === 2
             ? this.exposed
               ? "Глаз открыт — проведи разрез через него!"
@@ -685,16 +775,16 @@ export class Arena {
       slash.from,
     );
   }
-  private reward(gesture: Lesson, base: number) {
+  private reward(gesture: Spell, base: number) {
     this.combo++;
     this.maxCombo = Math.max(this.maxCombo, this.combo);
     this.lastHit = this.elapsed;
     const varied = this.lastGesture !== null && this.lastGesture !== gesture;
     this.score += base + Math.min(8, this.combo) * 10 + (varied ? 25 : 0);
-    this.energy = Math.min(100, this.energy + (varied ? 16 : 10));
+    this.energy = Math.min(100, this.energy + (varied ? 22 : 16));
     this.lastGesture = gesture;
   }
-  private destroy(e: Entity, gesture: Lesson) {
+  private destroy(e: Entity, gesture: Spell) {
     this.remove(e);
     this.reward(gesture, e.kind === "armored" ? 150 : 90);
     this.effect("break", e);
