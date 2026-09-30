@@ -774,21 +774,23 @@ function acceptDetection(detected: Detection) {
   const purpose: HandPurpose =
     mode === "demo" || mode === "mastery"
       ? "fist"
-      : mode === "preparation" || mode === "ready"
-        ? "open"
-        : mode === "calibration"
-          ? calibrator.ready
-            ? "fist"
-            : "open"
-          : mode === "practice"
-            ? world?.practice === "shield"
-              ? "open"
-              : world?.practice === "domain"
-                ? "any"
-                : (world!.practice as "vortex" | "swipe")
-            : mode === "battle"
-              ? "battle"
-              : "any";
+      : mode === "preparation"
+        ? "any"
+        : mode === "ready"
+          ? "open"
+          : mode === "calibration"
+            ? calibrator.ready
+              ? "fist"
+              : "open"
+            : mode === "practice"
+              ? world?.practice === "shield"
+                ? "open"
+                : world?.practice === "domain"
+                  ? "any"
+                  : (world!.practice as "vortex" | "swipe")
+              : mode === "battle"
+                ? "battle"
+                : "any";
   const locked =
     mode === "mastery"
       ? mastery.armed || mastery.hold > 0

@@ -85,3 +85,17 @@ it("never borrows a palm from the other hand to prime a fist", () => {
   expect(r.choose([hand(0.7, "fist")], ["Right"], 1100, "vortex")).toBe(0);
   expect(r.primed).toBe(false);
 });
+
+it("a previously unseen opposite hand cannot occupy a missing spell owner's slot", () => {
+  const r = new HandRouting();
+  r.choose([hand(0.4)], ["Left"], 100, "battle");
+  for (const t of [150, 300, 600])
+    expect(r.choose([hand(0.4)], ["Right"], t, "battle", true)).toBe(-1);
+  expect(r.choose([hand(0.4, "fist")], ["Left"], 650, "battle", true)).toBe(0);
+});
+it("keeps the preparation hand when closing it while another palm stays open", () => {
+  const r = new HandRouting();
+  r.choose([hand(0.3), hand(0.7)], sides, 100, "any");
+  for (let t = 150; t <= 1000; t += 50)
+    expect(r.choose([hand(0.3, "fist"), hand(0.7)], sides, t, "any")).toBe(0);
+});

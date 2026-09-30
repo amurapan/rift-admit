@@ -403,13 +403,28 @@ test("preparation cards require fresh gestures and support mobile and keyboard f
 }) => {
   await setup(page, 0, true);
   await page.screenshot({ path: "test-results/preparation-desktop.png" });
-  await gesture(page, "open");
+  await gesture(
+    page,
+    "open",
+    { x: 0.3, y: 0.5 },
+    { second: { gesture: "open", point: { x: 0.7, y: 0.5 } } },
+  );
   await expect(page.locator("#preparation")).toHaveAttribute("data-step", "1");
   await page.waitForTimeout(1600);
   await expect(page.locator("#preparation")).toHaveAttribute("data-step", "1");
-  await gesture(page, "rest");
+  await gesture(
+    page,
+    "rest",
+    { x: 0.3, y: 0.5 },
+    { second: { gesture: "open", point: { x: 0.7, y: 0.5 } } },
+  );
   await page.waitForTimeout(350);
-  await gesture(page, "open");
+  await gesture(
+    page,
+    "open",
+    { x: 0.3, y: 0.5 },
+    { second: { gesture: "open", point: { x: 0.7, y: 0.5 } } },
+  );
   await expect(page.locator("#preparation")).toHaveAttribute("data-step", "2");
   await page.evaluate(async () => {
     if (document.fullscreenElement) await document.exitFullscreen();

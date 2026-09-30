@@ -66,10 +66,17 @@ export class HandRouting {
         p = h.palm ?? h.cursor;
       const sidePenalty =
         s.side && sides[index] && s.side !== sides[index] ? 0.25 : 0;
-      return (
-        (s.palm ? Math.hypot(p.x - s.palm.x, p.y - s.palm.y) : 0.4) +
-        sidePenalty
-      );
+      if (!s.palm) {
+        // A new, confidently identified opposite hand gets its own slot even
+        // when it appears exactly where the old spell owner disappeared.
+        const knownSide = sides[index];
+        return knownSide
+          ? this.slots.some((track) => track.side === knownSide)
+            ? 1
+            : 0.1
+          : 0.4;
+      }
+      return Math.hypot(p.x - s.palm.x, p.y - s.palm.y) + sidePenalty;
     };
     let assignment = [-1, -1];
     if (present.length === 2) {
@@ -112,6 +119,7 @@ export class HandRouting {
       const s = this.slots[id],
         h = s.hand;
       if (!h || h.quality) return -1;
+      if (purpose === "any") return 0;
       const freshPalm = h.open && now - s.changedAt < 800 ? 1 : 0;
       if (purpose === "fist") return h.extended === 0 ? 5 : 0;
       if (purpose === "open") return h.open ? 3 + freshPalm : 0;
