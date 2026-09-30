@@ -184,3 +184,16 @@ it("awakening waits for the reveal, then requires a held sign followed by separa
   a.update(input({ twoHands: true, handGap: 0.4 }), 50);
   expect(a.complete).toBe(true);
 });
+
+it("a spare open palm does not steal a normal blade at full territory energy", () => {
+  const r = new Ritual();
+  hold(
+    r,
+    input({ bladeSign: true, twoHands: true, secondOpen: true }),
+    350,
+    100,
+  );
+  expect(r.bladeMs).toBeGreaterThan(0);
+  expect(r.stage).toBe("idle");
+  expect(r.domainHold).toBe(0);
+});

@@ -122,6 +122,7 @@ export class CursorFollower {
       if (input.trackingGrace && this.first)
         return {
           ...emptyControl(),
+          handId: input.handId,
           valid: true,
           position: this.first.draw(now),
           secondPosition: this.second?.draw(now) ?? null,

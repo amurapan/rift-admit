@@ -19,7 +19,8 @@ HandLandmarker:{createFromOptions:async()=>({close(){},async setOptions(){},dete
  }
  let point={...s.point};
  if(s.to){const f=Math.min(1,(now-s.since)/300);point={x:s.point.x+(s.to.x-s.point.x)*f,y:s.point.y+(s.to.y-s.point.y)*f};}
- return {landmarks:[hand(s.gesture,point),s.second?hand(s.second.gesture,s.second.point):null].filter(Boolean)};
+ const first=hand(s.gesture,point), second=s.second?hand(s.second.gesture,s.second.point):null;
+ return {landmarks:[first,second].filter(Boolean),handedness:[first?[{categoryName:'Left',score:.99}]:null,second?[{categoryName:'Right',score:.99}]:null].filter(Boolean)};
 }})}};`;
 async function gesture(
   page: Page,
@@ -656,4 +657,117 @@ test("audio produces distinct music scenes, ducks effects and respects mute and 
   expect(levels.restored).toBeGreaterThan(0.0001);
   expect(levels.state).toBe("suspended");
   expect(levels.addedWhileSuspended).toBe(0);
+});
+
+test("the second hand can learn a cut while the first stays visible", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.locator("#help").click();
+  await page.locator('[data-practice="swipe"]').click();
+  await prepare(page);
+  await gesture(
+    page,
+    "open",
+    { x: 0.85, y: 0.6 },
+    { second: { gesture: "open", point: { x: 0.2, y: 0.5 } } },
+  );
+  await page.waitForTimeout(900);
+  await gesture(
+    page,
+    "open",
+    { x: 0.85, y: 0.6 },
+    { second: { gesture: "sign", point: { x: 0.2, y: 0.5 } } },
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.blade))
+    .toBeGreaterThan(0);
+  await expect(page.locator("#primary-hand-state")).toContainText(
+    "2 · АКТИВНА",
+  );
+  // Move only the second physical hand through the practice crystal.
+  for (const x of [0.28, 0.36, 0.44, 0.52, 0.6, 0.68, 0.76]) {
+    await gesture(
+      page,
+      "open",
+      { x: 0.85, y: 0.6 },
+      { second: { gesture: "sign", point: { x, y: 0.5 } } },
+    );
+    await page.waitForTimeout(40);
+  }
+  await expect(page.locator("#mastery")).toBeVisible();
+  await page.screenshot({ path: "test-results/second-hand-lesson.png" });
+});
+
+test("a second-hand charge and mastery confirmation cannot transfer to the first hand", async ({
+  page,
+}) => {
+  await setup(page);
+  await expect(page.locator("#skip-intro")).toBeVisible({ timeout: 10000 });
+  await page.locator("#skip-intro").click();
+  await expect(page.locator("#lesson-demo")).toHaveAttribute(
+    "data-phase",
+    "prepare",
+    { timeout: 8000 },
+  );
+  await gesture(
+    page,
+    "open",
+    { x: 0.15, y: 0.7 },
+    { second: { gesture: "open", point: { x: 0.5, y: 0.5 } } },
+  );
+  await page.waitForTimeout(400);
+  await gesture(
+    page,
+    "open",
+    { x: 0.15, y: 0.7 },
+    { second: { gesture: "rest", point: { x: 0.5, y: 0.5 } } },
+  );
+  await expect(page.locator("#lesson-demo")).toBeHidden();
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => (window as any).__snapshot.vortex)).toBe(
+    false,
+  );
+  const first = { x: 0.15, y: 0.7 },
+    second = { x: 0.5, y: 0.5 };
+  const both = (pose: string) =>
+    gesture(page, "open", first, { second: { gesture: pose, point: second } });
+  await both("open");
+  await page.waitForTimeout(400);
+  await both("rest");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.vortex))
+    .toBe(true);
+  await expect(page.locator("#primary-hand-state")).toContainText(
+    "2 · АКТИВНА",
+  );
+  await page.waitForTimeout(1100);
+  expect(
+    await page.evaluate(() => (window as any).__snapshot.stats.bursts),
+  ).toBe(0);
+  // The visible first palm cannot release the disappearing second-hand charge.
+  await gesture(page, "open", first);
+  await page.waitForTimeout(750);
+  expect(
+    await page.evaluate(() => (window as any).__snapshot.stats.bursts),
+  ).toBe(0);
+  expect(await page.evaluate(() => (window as any).__snapshot.vortex)).toBe(
+    false,
+  );
+  await both("open");
+  await page.waitForTimeout(500);
+  await both("rest");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__snapshot.vortex))
+    .toBe(true);
+  await page.waitForTimeout(1100);
+  await both("open");
+  await expect(page.locator("#mastery")).toBeVisible();
+  await both("rest");
+  await expect(page.locator("#mastery")).toHaveAttribute("data-armed", "true");
+  await page.waitForTimeout(800);
+  await expect(page.locator("#mastery")).toBeVisible();
+  await both("open");
+  await expect(page.locator("#mastery")).toBeHidden();
+  await expect(page.locator("#lesson-title")).toHaveText("Отрази его силу.");
 });

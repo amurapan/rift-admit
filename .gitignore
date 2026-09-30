@@ -5,3 +5,4 @@ public/mediapipe/
 *.log
 test-results/
 playwright-report/
+.vercel

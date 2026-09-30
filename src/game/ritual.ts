@@ -74,6 +74,21 @@ export class Ritual {
   private strokeId: number | undefined;
   private errorMs = 0;
   private domainMissMs = 0;
+  get ownsHand() {
+    return (
+      !!this.vortex ||
+      this.fistMs > 0 ||
+      this.bladeHold > 0 ||
+      this.bladeMs > 0 ||
+      this.spearHold > 0 ||
+      this.bindHold > 0 ||
+      this.domainHold > 0 ||
+      this.stage !== "idle"
+    );
+  }
+  primeCompression() {
+    this.ready = true;
+  }
   reset() {
     this.chargeMs = 0;
     this.charge = 0;
@@ -149,7 +164,7 @@ export class Ritual {
       // Two signed hands reserve the input before the single-hand blade can arm.
       const attempting =
         allowed === "domain" ||
-        (input.twoHands && (input.bladeSign || input.secondSign));
+        (input.twoHands && input.bladeSign && input.secondSign);
       if (attempting) {
         this.label = "ТЕРРИТОРИЯ · ПЕЧАТЬ ТИГРА";
         this.hint = !input.twoHands
@@ -328,7 +343,7 @@ export class Ritual {
         this.progress = this.bladeHold / 300;
         this.hint = input.bladeSign
           ? "Поза верная. На мгновение останови кисть."
-          : "На руке ① подними УКАЗАТЕЛЬНЫЙ и СРЕДНИЙ. Безымянный и мизинец согни. Щипок здесь не нужен.";
+          : "На любой руке подними УКАЗАТЕЛЬНЫЙ и СРЕДНИЙ. Безымянный и мизинец согни. Щипок здесь не нужен.";
       }
       if (this.bladeMs > 0) {
         this.label = "РАЗРЕЗ · ПЕЧАТЬ ПРИНЯТА";

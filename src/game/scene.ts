@@ -1006,7 +1006,7 @@ export class Scene {
       this.vignette = layer;
     }
     c.drawImage(this.vignette, 0, 0, w, h);
-    // Both tracked hands stay visible. Numbers refer to roles, not mirrored left/right.
+    // Physical hand numbers and colors stay stable when spell ownership changes.
     if (
       input.valid &&
       (!intro || this.presentation.reveal >= 1) &&
@@ -1016,7 +1016,10 @@ export class Scene {
         world &&
         !world.practiceDone &&
         (world.practice === "domain" ||
-          (!world.practice && world.energy >= 100)) &&
+          (!world.practice &&
+            world.energy >= 100 &&
+            input.bladeSign &&
+            input.secondSign)) &&
         !world.domainMs &&
         world.magic.stage === "idle" &&
         input.secondPosition
@@ -1088,16 +1091,12 @@ export class Scene {
         c.fillText(String(number), p.x, p.y);
         c.font = "9px Manrope,sans-serif";
         c.fillText(
-          number === 1
-            ? input.pinching
-              ? "РИСУЮ"
-              : "ТВОЯ МАГИЯ"
-            : "ВТОРАЯ РУКА",
+          number === (input.handId ?? 0) + 1 ? "АКТИВНАЯ РУКА" : "ДРУГАЯ РУКА",
           p.x,
           p.y + 25,
         );
         if (
-          number === 1 &&
+          number === (input.handId ?? 0) + 1 &&
           world?.practice === "swipe" &&
           !world.magic.bladeMs &&
           world.magic.bladeHold > 0
@@ -1116,12 +1115,17 @@ export class Scene {
       };
       cursor(
         input.position,
-        1,
-        "#edc6ff",
+        (input.handId ?? 0) + 1,
+        input.handId === 1 ? "#95f4dd" : "#edc6ff",
         input.pinching || !!world?.magic.bladeMs,
       );
       if (input.secondPosition)
-        cursor(input.secondPosition, 2, "#95f4dd", input.secondOpen);
+        cursor(
+          input.secondPosition,
+          2 - (input.handId ?? 0),
+          input.handId === 1 ? "#edc6ff" : "#95f4dd",
+          false,
+        );
     }
   }
 }

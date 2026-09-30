@@ -17,13 +17,10 @@ import {
   MotionControl,
   type Calibration,
 } from "./game/control";
+import { HandRouting, type HandPurpose } from "./game/hand-routing";
 import { HandOverlay } from "./game/pointer";
 import { Scene } from "./game/scene";
-import {
-  CastingHand,
-  CursorFollower,
-  TrackingContinuity,
-} from "./game/tracking";
+import { CursorFollower, TrackingContinuity } from "./game/tracking";
 import {
   Preparation,
   preparationCards,
@@ -96,7 +93,7 @@ let lastInference = 0,
 let world: Arena | null = null;
 let control = emptyControl();
 let hand: Hand | null = null;
-const castingHand = new CastingHand();
+const castingHand = new HandRouting();
 const cursors = new CursorFollower();
 const continuity = new TrackingContinuity();
 const handOverlay = new HandOverlay();
@@ -274,7 +271,7 @@ function introduceLesson() {
     [
       "Покажи ладонь, затем сожми кулак рядом с обломками. Дождись яркого кольца и полностью раскрой ладонь — выпусти волну.",
       "Поставь открытую ладонь на светящуюся траекторию снаряда. Печать примет удар. Подними её перед попаданием, чтобы отразить атаку.",
-      "Одна рука, два пальца: УКАЗАТЕЛЬНЫЙ и СРЕДНИЙ. Согни безымянный и мизинец. Дождись свечения курсора ①, затем взмахни через кристалл.",
+      "Любая рука: подними УКАЗАТЕЛЬНЫЙ и СРЕДНИЙ. Согни безымянный и мизинец. Дождись свечения её курсора, затем взмахни через кристалл.",
       "Подними указательный и средний на каждой руке. Удержи до свечения, затем раскрой обе ладони. Кисти не должны перекрывать друг друга.",
     ][index],
   );
@@ -774,7 +771,65 @@ function acceptDetection(detected: Detection) {
   lastInference = now;
   const { landmarks, sides, width, height } = detected;
   const hands = landmarks.map((points) => describeHand(points, width / height));
-  const index = castingHand.choose(hands, sides, now);
+  const purpose: HandPurpose =
+    mode === "demo" || mode === "mastery"
+      ? "fist"
+      : mode === "preparation" || mode === "ready"
+        ? "open"
+        : mode === "calibration"
+          ? calibrator.ready
+            ? "fist"
+            : "open"
+          : mode === "practice"
+            ? world?.practice === "shield"
+              ? "open"
+              : world?.practice === "domain"
+                ? "any"
+                : (world!.practice as "vortex" | "swipe")
+            : mode === "battle"
+              ? "battle"
+              : "any";
+  const locked =
+    mode === "mastery"
+      ? mastery.armed || mastery.hold > 0
+      : mode === "demo"
+        ? tutorial.fistMs > 0
+        : mode === "preparation"
+          ? preparation.hold > 0
+          : mode === "calibration"
+            ? calibrator.fistMs > 0
+            : mode === "ready" || mode === "result"
+              ? resultHold > 0
+              : mode === "battle" || mode === "practice"
+                ? !!world?.magic.ownsHand
+                : false;
+  const index = castingHand.choose(
+    hands,
+    sides,
+    now,
+    purpose,
+    locked,
+    (world?.phase ?? 0) >= 1,
+  );
+  if (castingHand.switched) {
+    // Never carry a motion path, confirmation or charge into another hand.
+    motion.reset();
+    continuity.reset();
+    cursors.reset();
+    handOverlay.reset();
+    world?.magic.pause();
+    tutorial.pause();
+    mastery.pause();
+    preparation.pause();
+    resultHold = 0;
+    calibrator.fistMs = 0;
+    if (
+      (mode === "battle" || mode === "practice") &&
+      castingHand.primed &&
+      hands[index]?.extended === 0
+    )
+      world?.magic.primeCompression();
+  }
   hand = index < 0 ? null : (hands[index] ?? null);
   control = continuity.update(
     motion.update(
@@ -785,6 +840,7 @@ function acceptDetection(detected: Detection) {
     ),
     performance.now(),
   );
+  control.handId = castingHand.id;
   cursors.sample(control, now);
   if (!control.trackingGrace)
     handOverlay.sample(
@@ -885,7 +941,8 @@ function acceptDetection(detected: Detection) {
       "lesson-arm",
       tutorial.phase === "demo"
         ? `Посмотри движение · ${Math.max(1, Math.ceil(tutorial.remainingMs / 1000))}`
-        : (hand?.quality ?? "Сожми кулак на полсекунды, когда будешь готов"),
+        : (hand?.quality ??
+            "Сожми кулак любой рукой на полсекунды, когда будешь готов"),
     );
     el("lesson-arm-progress").style.width = `${(tutorial.fistMs / 400) * 100}%`;
     if (ready) startPractice();
@@ -930,7 +987,10 @@ function drawHandOverlay(now: number) {
   }
   sk.clearRect(0, 0, skeleton.width, skeleton.height);
   handOverlay.draw(now).forEach((points, i) => {
-    sk.strokeStyle = i === 0 ? "#b4efd9" : "#e1c1ff";
+    sk.strokeStyle =
+      (i === 0 ? castingHand.id : 1 - castingHand.id) === 0
+        ? "#e1c1ff"
+        : "#b4efd9";
     sk.fillStyle = sk.strokeStyle;
     sk.lineWidth = 1;
     connections.forEach((chain) => {
@@ -1136,18 +1196,25 @@ function updateInputGuide() {
           ? "кулак"
           : control.secondSign
             ? "два пальца"
-            : "раскрой ладонь");
-  text("primary-hand-state", `① ${primary}`);
-  text("second-hand-state", `② ${secondary}`);
+            : "рука в кадре");
+  text("primary-hand-state", `${castingHand.id + 1} · АКТИВНА · ${primary}`);
+  text("second-hand-state", `${2 - castingHand.id} · ${secondary}`);
   el("primary-hand-state").dataset.seen = String(control.valid);
   el("second-hand-state").dataset.seen = String(control.twoHands);
-  text("awakening-hands-status", `① ${primary} · ② ${secondary}`);
+  text(
+    "awakening-hands-status",
+    `${castingHand.id + 1} ${primary} · ${2 - castingHand.id} ${secondary}`,
+  );
   const magic = world?.magic;
   const domain =
     !!world &&
     (world.practice === "domain" ||
       magic?.stage !== "idle" ||
-      (world.energy >= 100 && !world.domainMs));
+      !!magic?.domainHold ||
+      (world.energy >= 100 &&
+        !world.domainMs &&
+        control.bladeSign &&
+        control.secondSign));
   const visual =
     world?.practice ??
     (world?.magic.stage !== "idle" || world?.magic.domainHold
@@ -1219,19 +1286,7 @@ function frame(now: number) {
         mastery.pause();
         hand = null;
       }
-      model.setHands(
-        mode === "awakening" ||
-          mode === "preparation" ||
-          ((mode === "practice" || mode === "demo") &&
-            world?.practice === "domain") ||
-          (mode === "battle" &&
-            !!world &&
-            (world.phase >= 1 ||
-              world.energy >= 100 ||
-              world.magic.stage !== "idle"))
-          ? 2
-          : 1,
-      );
+      model.setHands(2);
       if ((mode === "battle" || mode === "practice") && world) {
         world.tick(
           Math.min(dt, 100),
@@ -1240,6 +1295,7 @@ function frame(now: number) {
             : control,
           document.body.classList.contains("help-open"),
         );
+        if (world.magic.vortex) castingHand.consumePrimer();
         control = {
           ...control,
           released: false,

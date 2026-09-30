@@ -17,6 +17,7 @@ export type Slash = { from: Point; to: Point; id?: number };
 // Palms should remain separated so the camera can keep tracking both hands.
 export const DOMAIN_NEAR_DISTANCE = 0.52;
 export type Control = {
+  handId?: number;
   valid: boolean;
   // Missing measurements may briefly preserve presentation, never gesture time.
   trackingGrace?: boolean;
